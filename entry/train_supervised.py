@@ -2,9 +2,16 @@ from utilsd import setup_experiment
 from utilsd.config import configclass, RegistryConfig, RuntimeConfig, PythonConfig
 from utilsd.experiment import print_config
 
+from ..model import MODEL
+from ..network import NETWORK
+
+
 @configclass
 class SupervisedMahjongConfig(PythonConfig):
-    pass
+    # data = RegistryConfig[DATASET]
+    network: RegistryConfig[NETWORK]
+    model: RegistryConfig[MODEL]
+    runtime: RuntimeConfig = RuntimeConfig()
 
 
 def run_supervised(config):
@@ -17,7 +24,7 @@ def run_supervised(config):
         network=network,
     )
     model.fit(trainset, testset)
-    
+
 
 if __name__ == "__main__":
     _config = SupervisedMahjongConfig.fromcli()
