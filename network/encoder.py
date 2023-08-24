@@ -36,7 +36,11 @@ class RecordEncoder(nn.Module):
     def forward(self, x):
         # x: shape [batch_size, record_step, 55]
         x, _ = self.lstm(x)
-        return x[:, -1, :]
+        unpacked, unpacked_lengths = nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
+        idx = (unpacked_lengths - 1).unsqueeze(-1).expand(-1, unpacked.size(2))
+        idx = idx.to(unpacked.device)
+        last_states = unpacked.gather(1, idx.unsqueeze(1)).squeeze(1)
+        return last_states
     
     
 class GlobalInfoEncoder(nn.Module):

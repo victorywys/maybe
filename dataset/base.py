@@ -3,5 +3,5 @@ import torch.nn as nn
 from utilsd.config import Registry
 
 
-class NETWORK(metaclass=Registry, name="network"):
+class DATASET(metaclass=Registry, name="dataset"):
     pass

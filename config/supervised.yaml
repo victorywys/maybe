@@ -1,0 +1,18 @@
+data:
+  type: supervised
+  root_dir: /Data/yansen/mahjong/supervised
+
+network:
+  type: MahjongPlayer
+
+model: 
+  type: SupervisedMahjong
+  batch_size: 1024
+  num_worker: 0
+
+runtime:
+  seed: 42
+  output_dir: "./output/test"
+  checkpoint_dir: "./output/test/checkpoint"
+  tb_log_dir: "./output/test/tb_log"
+  debug: False

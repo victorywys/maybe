@@ -5,7 +5,7 @@ from .base import NETWORK
 from .encoder import SelfInfoEncoder, RecordEncoder, GlobalInfoEncoder
 
 
-@NETWORK.register()
+@NETWORK.register_module()
 class MahjongPlayer(nn.Module):
     def __init__(self):
         super(MahjongPlayer, self).__init__()
@@ -16,7 +16,7 @@ class MahjongPlayer(nn.Module):
         self.policy_head = nn.Sequential(
             nn.Linear(self.self_info_encoder.out_dim + self.record_encoder.out_dim + self.global_info_encoder.out_dim, 128),
             nn.ReLU(),
-            nn.Linear(128, 34),
+            nn.Linear(128, action_dim),
         )
 
     def forward(self, self_info, record, global_info):

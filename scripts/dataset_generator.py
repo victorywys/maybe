@@ -36,8 +36,6 @@ min_dan = 16  # 最低段位限制，可以排除三麻的局（三麻的缺省p
 at_least_how_many_tiles_remain_can_riichi = 4
 
 
-
-
 def paipu_link(paipu):
     paipu = paipu[:-4]
     return r'http://tenhou.net/0/?log=' + paipu
@@ -207,7 +205,7 @@ class PaipuReplay:
                     # self.log(f'Replayer.init: {yama} {scores} {riichi_sticks} {honba} {game_order // 4} {oya_id}')
                     replayer.init(yama, scores, riichi_sticks, honba, game_order // 4, oya_id)
                     # self.log('Init over.')
-                    
+
                     # Initialize data recorder with replayer
                     self.data_recorder.init(replayer)
 
@@ -599,7 +597,7 @@ class PaipuReplay:
                 else:
                     raise MahjongException(child.tag, child.attrib, "Unexpected Element!")
 
-    def paipu_replay(self, basepath=".", mode='debug'):
+    def paipu_replay(self, basepath=".", part=0, mode='debug'):
         # -------- 读取2020年所有牌谱的url ---------------
         # 参考 https://m77.hatenablog.com/entry/2017/05/21/214529
 
@@ -607,6 +605,7 @@ class PaipuReplay:
         is_new_round = False
 
         # ----------------- start ---------------------
+        self.part = part
 
         path = basepath
 
@@ -618,8 +617,14 @@ class PaipuReplay:
             fp.close()
         files = os.listdir(path)  # 得到文件夹下的所有文件名称
         self.total_games = len(files)
+        file_per_part = self.total_games // 4
+        part_start = part * file_per_part
+        part_end = (part + 1) * file_per_part if part < 3 else self.total_games
+
+        self.total_games = part_end - part_start
         t_start = time.time()
-        for num, paipu in enumerate(files):
+        for num, paipu in enumerate(files[part_start:part_end]):
+
             if not paipu.endswith('txt'):
                 continue
 
@@ -633,13 +638,13 @@ class PaipuReplay:
             t_eps_min = int((t_eps - 3600 * t_eps_h) / 60)
             t_eps_s = t_eps - 3600 * t_eps_h - 60 * t_eps_min
             t_eps_format = f"{t_eps_h:02d}:{t_eps_min:02d}:{t_eps_s:.02f}"
-            
+
             t_eta = t_eps / self.num_games * self.total_games - t_eps
             t_eta_h = int(t_eta / 3600)
             t_eta_min = int((t_eta - 3600 * t_eta_h) / 60)
             t_eta_s = t_eta - 3600 * t_eta_h - 60 * t_eta_min
             t_eta_format = f"{t_eta_h:02d}:{t_eta_min:02d}:{t_eta_s:.02f}"
-            
+
             print(f"{num}/{self.num_games}/{self.total_games} {paipu} elapse: {t_eps_format} eta: {t_eta_format}")
             try:
                 self.log_cache = ""
@@ -696,14 +701,14 @@ class PaipuReplay:
         self._paipu_replay(".", paipu_name)
 
 
-def paipu_replay(data_recorder, basepath, mode='debug'):
+def paipu_replay(data_recorder, basepath, part, mode='debug'):
     if mode == 'debug':
         _logger = logger(fp='stdout')
     else:
         _logger = logger()
     replayer = PaipuReplay(data_recorder)
     replayer.logger = _logger
-    replayer.paipu_replay(basepath=basepath, mode=mode)
+    replayer.paipu_replay(basepath=basepath, part=part, mode=mode)
     print(replayer.progress())
     return replayer
 
@@ -721,9 +726,13 @@ def paipu_replay_1(filename, data_recorder):
     return replayer
 
 def run_recorder(batch_id):
-    data_recorder = SupervisedRecorder(save_path=f"./data/supervised/2020/{batch_id}/")
-    paipu_replay(data_recorder, os.path.join("/home/yansenwang/code/mahjong_ai/maybee/scripts/paipuxmls", f"{batch_id}"), mode='mark')
+    month = batch_id % 12 + 1
+    part = batch_id // 12
+    batch_id = f"2020{month:02d}"
+    print(batch_id, part)
+    data_recorder = SupervisedRecorder(save_path=f"/Data/yansen/mahjong/supervised/2020/{batch_id}/{part}")
+    paipu_replay(data_recorder, os.path.join("/home/yasenwang/code/mahjong_ai/maybee/scripts/paipuxmls", f"{batch_id}"), part, mode='mark')
     data_recorder.save()
 
 if __name__ == "__main__":
-    joblib.Parallel(n_jobs=12)(joblib.delayed(run_recorder)(batch_id) for batch_id in range(202001, 202013))
+    joblib.Parallel(n_jobs=48)(joblib.delayed(run_recorder)(batch_id) for batch_id in range(48))
