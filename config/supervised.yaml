@@ -1,18 +1,19 @@
 data:
   type: supervised
-  root_dir: /Data/yansen/mahjong/supervised
+  root_dir: /Data/yansen/mahjong/supervised_fixed
 
 network:
   type: MahjongPlayer
 
 model: 
   type: SupervisedMahjong
-  batch_size: 1024
+  batch_size: 2048
+  save_interval: 10000
   num_worker: 0
 
 runtime:
-  seed: 42
-  output_dir: "./output/test"
-  checkpoint_dir: "./output/test/checkpoint"
-  tb_log_dir: "./output/test/tb_log"
+  seed: 32000
+  output_dir: "./output/test_fixed"
+  checkpoint_dir: "./output/test_fixed/checkpoint"
+  tb_log_dir: "./output/test_fixed/tb_log"
   debug: False

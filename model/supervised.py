@@ -16,6 +16,7 @@ from .base import MODEL
 
 from dataset import supervised_collate_fn, MultiFileSampler
 
+import os
 
 @MODEL.register_module()
 class SupervisedMahjong(nn.Module):
@@ -26,6 +27,7 @@ class SupervisedMahjong(nn.Module):
         batch_size: int = 256,
         num_worker: int = 8,
         max_epochs: int = 100,
+        save_interval: Optional[int] = None,
         network: Optional[nn.Module] = None,
         output_dir: Optional[str] = None,
         checkpoint_dir: Optional[str] = None,
@@ -35,9 +37,12 @@ class SupervisedMahjong(nn.Module):
         self.num_workers = num_worker
         self.max_epochs = max_epochs
         self.network = network
+        self.save_interval = save_interval
         self._init_optimization(lr, weight_decay)
         self._init_logger(output_dir)
         self.checkpoint_dir = checkpoint_dir
+        if not os.path.isdir(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir)
         if use_cuda():
             print("Using GPU")
             self.cuda()
@@ -63,6 +68,7 @@ class SupervisedMahjong(nn.Module):
             num_workers=self.num_workers,
         )
         start_epoch, best_res = self._resume()
+        
         for epoch in range(start_epoch, self.max_epochs):
             self.train()
             start_time = time.time()
@@ -71,7 +77,7 @@ class SupervisedMahjong(nn.Module):
             total_correct = 0.
             
             with tqdm(total=len(loader), desc=f"Epoch {epoch}") as pbar:
-                for _, (self_info, record, global_info, label) in enumerate(loader):
+                for batch_i, (self_info, record, global_info, label) in enumerate(loader):
                     if use_cuda():
                         self_info = self_info.cuda()
                         record = record.cuda()
@@ -88,6 +94,8 @@ class SupervisedMahjong(nn.Module):
                     total_correct += (output.argmax(dim=1) == label).sum().item()
                     pbar.set_postfix_str(f"loss: {loss.item():.4f}, acc: {total_correct / total_num:.4f}")
                     pbar.update(1)
+                    if (batch_i + 1) % self.save_interval == 0:
+                        self._checkpoint(epoch, best_res)
                 
             train_summary = {
                 "time": time.time() - start_time,
@@ -204,5 +212,7 @@ class SupervisedMahjong(nn.Module):
             return checkpoint["epoch"], checkpoint["best_res"]
         else:
             print(f"No checkpoint found in {self.checkpoint_dir}", __name__)
+            self.best_params = self.state_dict()
+            self.best_network_params = self.network.state_dict()
             return 0, {}
 

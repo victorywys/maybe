@@ -730,7 +730,7 @@ def run_recorder(batch_id):
     part = batch_id // 12
     batch_id = f"2020{month:02d}"
     print(batch_id, part)
-    data_recorder = SupervisedRecorder(save_path=f"/Data/yansen/mahjong/supervised/2020/{batch_id}/{part}")
+    data_recorder = SupervisedRecorder(save_path=f"/Data/yansen/mahjong/supervised_fixed/2020/{batch_id}/{part}")
     paipu_replay(data_recorder, os.path.join("/home/yasenwang/code/mahjong_ai/maybee/scripts/paipuxmls", f"{batch_id}"), part, mode='mark')
     data_recorder.save()
 

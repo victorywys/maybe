@@ -40,7 +40,7 @@ class SupervisedDataset(Dataset):
         
         self.build_start_end_idx()
         self.file_cache = {}
-        self.CACHE_SIZE = 5
+        self.CACHE_SIZE = 3
         self.RECORD_PAD = torch.zeros(1, 55)
         
     def build_start_end_idx(self):
@@ -115,6 +115,8 @@ class MultiFileSampler(Sampler):
             self.dataset.suffle_file_name()
             return chain(*[RandomPerm(start, end) for start, end in self.dataset.start_end_idx])
         else:
+            self.dataset.file_cache = {}
+            gc.collect()
             return iter(range(self.dataset.data_num))
 
     def __len__(self):
