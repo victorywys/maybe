@@ -145,6 +145,9 @@ yaku_to_tenhou = {
     Yaku.Koukushimusou_13: "国士無双１３面(役満)",
     Yaku.Pure_Churenpoutou: "純正九蓮宝燈(役満)",
     Yaku.Daisushi: "大四喜(役満)",
+    Yaku.Dora: "ドラ",
+    Yaku.UraDora: "裏ドラ",
+    Yaku.AkaDora: "赤ドラ",
 }
 
 def get_base_tile(tile):

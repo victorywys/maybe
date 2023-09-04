@@ -1,8 +1,102 @@
+from typing import List
+
+from dataclasses import dataclass, field
 from utilsd.config import Registry
 import numpy as np
 
+import pymahjong as pm
+from pymahjong import Yaku
+from arena.common import yaku_to_tenhou
+
+
 class PLAYER(metaclass=Registry, name="player"):
     pass
+
+
+@dataclass
+class Statistics():
+    total_games: int = 0
+    total_agali: int = 0
+    total_tsumo: int = 0
+    total_furi: int = 0
+    total_notile: int = 0
+    total_notile_tenpai: int = 0
+    agali_scores: List = field(
+        default_factory=lambda: []
+    )
+    furi_scores: List = field(
+        default_factory=lambda: []
+    )
+    yakus: dict = field(
+        default_factory= lambda: {
+            yaku: 0 for yaku in yaku_to_tenhou
+        }
+    )
+
+    def update_yakus(self, yakus: List[Yaku]):
+        for yaku in yakus:
+            self.yakus[yaku] += 1
+
+    def update(self, t: pm.Table, player_id: int):
+        self.total_games += 1
+        result = t.get_result()
+        result_type = result.result_type
+        if result_type == pm.ResultType.TsumoAgari:
+            winner = result.winner[0]
+            if winner == player_id: # 自摸
+                self.total_agali += 1
+                self.total_tsumo += 1
+                is_oya = t.oya == player_id
+                # 计算本场数，不计算立直棒
+                if is_oya:
+                    score = result.results[winner].score1 * 3 + t.honba * 300
+                else:
+                    score = result.results[winner].score1 + result.results[winner].score2 * 2 + t.honba * 300
+                self.agali_scores.append(score)
+                self.update_yakus(result.results[player_id].yakus)
+        elif result_type == pm.ResultType.RonAgari:
+            if player_id in result.results: # 荣胡
+                self.total_agali += 1
+                loser = result.loser[0]
+                for i in range(4):
+                    if (pid := (loser + i) % 4) in result.results:
+                        first_ron = pid
+                        break
+                if first_ron == player_id: # 头跳有场供
+                    score = result.results[player_id].score1 + t.honba * 300
+                else:
+                    score = result.results[player_id].score1
+                self.agali_scores.append(score)
+                self.update_yakus(result.results[player_id].yakus)
+            elif player_id == result.loser[0]: # 放铳
+                self.total_furi += 1
+                score = t.honba * 300
+                for winner in result.results:
+                    score += result.results[winner].score1
+                self.furi_scores.append(score)
+        elif result_type == pm.ResultType.NagashiMangan:
+            # TODO: add nagashi mangan
+            pass
+        elif result_type == pm.ResultType.NoTileRyuuKyoku:
+            # TODO: add no tile ryuukyoku tenpai and noten
+            self.total_notile += 1
+
+
+    def dump_stats(self):
+        lines = [
+            f"总局数：{self.total_games}",
+            f"和牌率：{float(self.total_agali) / self.total_games * 100:.2f}%",
+            f"自摸率：{float(self.total_tsumo) / self.total_games * 100:.2f}%",
+            f"放铳率：{float(self.total_furi) / self.total_games * 100:.2f}%",
+            f"流局率：{float(self.total_notile) / self.total_games * 100:.2f}%",
+            f"平均和牌点数：{np.mean(self.agali_scores) if len(self.agali_scores) > 0 else 0.:.2f}",
+            f"平均放铳点数：{np.mean(self.furi_scores) if len(self.furi_scores) > 0 else 0.:.2f}",
+            f"役种："
+        ] 
+        for yaku in self.yakus:
+            if self.yakus[yaku] != 0:
+                lines.append(f"\t{yaku_to_tenhou[yaku]}: {self.yakus[yaku]} ({float(self.yakus[yaku]) / self.total_games * 100:.2f}%)")
+        return "\n".join(lines)
 
 
 @PLAYER.register_module(name="base")
@@ -12,6 +106,7 @@ class BasePlayer():
         name: str
     ):
         self.name = name
+        self.stat = Statistics()
 
     def play(
         self, 
@@ -20,6 +115,12 @@ class BasePlayer():
         global_info: np.ndarray,
     ):
         raise NotImplementedError
+
+    def update_stats(self, t: pm.Table, player_id: int):
+        self.stat.update(t, player_id)
+
+    def dump_stats(self):
+        return self.stat.dump_stats()
     
 
 @PLAYER.register_module(name="random")

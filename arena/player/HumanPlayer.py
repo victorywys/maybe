@@ -13,7 +13,7 @@ class HumanPlayer(BasePlayer):
         self, 
         name: str
     ):
-        self.name = name
+        super.__init__(name)
         self.deside_riichi = False
         self.printed_line = 0
 

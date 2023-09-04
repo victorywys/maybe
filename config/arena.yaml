@@ -8,14 +8,16 @@ player2:
   type: supervised
   name: sup2
   weight_path: output/test_fixed/checkpoint/resume.pth
-  gpu: 
+  gpu: 1
 
 player3:
   type: supervised
   name: sup3
   weight_path: output/test_fixed/checkpoint/resume.pth
-  gpu: 1
+  gpu: 2
 
 player4:
-  type: human
-  name: mss
+  type: supervised
+  name: sup4
+  weight_path: output/test_fixed/checkpoint/resume.pth
+  gpu: 3

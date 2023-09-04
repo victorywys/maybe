@@ -34,7 +34,7 @@ if __name__ == "__main__":
     ]
 
     env = MahjongEnv()
-    num_games = 1000
+    num_games = 50000
 
     start_time = time.time()
     game = 0
@@ -85,6 +85,9 @@ if __name__ == "__main__":
             print(th_log.dump_game())
             print()
 
+            for i, p in enumerate(players):
+                p.update_stats(env.t, i)
+
             success_games += 1
             game += 1
 
@@ -100,3 +103,8 @@ if __name__ == "__main__":
             # print("-------------- replayable log -------------------------------")
             # env.t.print_debug_replay()
             continue
+    
+    print("Total time: {:.2f}s".format(time.time() - start_time))
+    print("Success games: {}".format(success_games))
+    for i, p in enumerate(players):
+        print("Player {} stats: \n{}".format(i, p.dump_stats()))
