@@ -10,8 +10,42 @@ UNICODE_TILES = """
     🀆 🀅 🀄
     🀋 🀝 🀔
 """.split()
-ACTIONS = ["摸牌", "摸杠牌", "手切", "摸切", "吃L", "吃M", "吃R", "碰", "明杠", "暗杠", "加杠", "手切立直", "摸切立直", "立直通过", "关联自家", "关联下家", "关联对家", "关联上家"]
+ACTIONS = ["摸牌", "摸杠牌", "手切", "摸切", "吃L", "吃M", "吃R", "碰", "明杠", "暗杠", "加杠", "手切立直", "摸切立直", "立直通过", "自家", "下家", "对家", "上家"]
 
+tile_to_human = [
+    "1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m",
+    "1p", "2p", "3p", "4p", "5p", "6p", "7p", "8p", "9p",
+    "1s", "2s", "3s", "4s", "5s", "6s", "7s", "8s", "9s",
+    "dong", "nan", "xi", "bei", "bai", "fa", "zhong",
+    "0m", "0p", "0s",
+]
+ju_to_human = ["东一局", "东二局", "东三局", "东四局", "南一局", "南二局", "南三局", "南四局", "西一局", "西二局", "西三局", "西四局", "北一局", "北二局", "北三局", "北四局"]
+human_to_tile = {
+    tile: i for i, tile in enumerate(tile_to_human)
+}
+# FIXME: currently only support discard non-red-akad tile first
+human_to_tile["0m"] = 4
+human_to_tile["0p"] = 13
+human_to_tile["0s"] = 22
+
+feng_to_human = ["东", "南", "西", "北"]
+human_to_action = {
+    "cl": 34,
+    "cm": 35,
+    "cr": 36,
+    "pon": 37,
+    "ag": 38,
+    "mg": 39,
+    "jg": 40,
+    "ron": 42,
+    "zm": 43,
+    "99": 44,
+    "p": 46,
+}
+action_to_human = {
+    i: a for a, i in human_to_action.items()
+}
+    
 tile_to_tenhou = list(range(11, 20)) + list(range(21, 30)) + list(range(31, 40)) + list(range(41, 48)) + [51, 52, 53]
 tile_name_to_tenhou = {
     "1m": 11,
@@ -131,13 +165,12 @@ def render_global_info(global_info):
 def render_encoding_record(record):
     a = np.argwhere(np.array(record)).reshape([-1])
     action_strs = []
-    for i in a:
+    for i in reversed(a):
         if i < 37:
-            action_strs.append(UNICODE_TILES[i])
+            action_strs.append(tile_to_human[i])
         else:
             action_strs.append(ACTIONS[i - 37])
-
-    print(", ".join(action_strs))
+    print(" ".join(action_strs))
 
 def render_encoding_self_info(self_info):
     # 0-3

@@ -1,0 +1,15 @@
+player1:
+  type: random
+  name: rand1
+
+player2:
+  type: random
+  name: rand2
+  
+player3:
+  type: random
+  name: rand3
+
+player4:
+  type: human
+  name: mss

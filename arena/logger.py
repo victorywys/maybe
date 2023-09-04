@@ -16,11 +16,12 @@ class TenhouJsonLogger():
     def init_match(
         self, 
         player_names: List[str] = ["player 1", "player 2", "player 3", "player 4"],
-        game_desc: str = "",
+        game_desc1: str = "",
+        game_desc2: str = "",
         rule_desc: str = "1 game",
     ):
-        self.title = game_desc,
-        self.name = player_names,
+        self.title = [game_desc1, game_desc2]
+        self.name = player_names
         self.rule = {
             "disp": rule_desc,
             "aka": 1,
