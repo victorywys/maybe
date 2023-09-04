@@ -25,3 +25,13 @@ python train_supervised.py config/supervised.yaml [other arguments]
 
 The configuration is implemented based on [utilsd](https://github.com/ultmaster/utilsd).
 Remember to change the corresponding configurations (e.g. path to dataset) before training.
+
+#### Test model
+```
+python compete_model.py config/arena.yaml
+```
+
+Now 3 different types of players can be specified in ```config/arena.yaml``` file:
+1. **Random player** who will randomly choose an action per his turn.
+2. **Supervised player** who will load checkpoint from the supervised training and play according his prediction.
+3. **Human player (in progress)** who will let the user decide how to play via the terminal. 
