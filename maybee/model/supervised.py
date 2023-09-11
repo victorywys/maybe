@@ -209,7 +209,8 @@ class SupervisedMahjong(nn.Module):
             self.optimizer.load_state_dict(checkpoint["optim"])
             self.best_params = checkpoint["best_params"]
             self.best_network_params = checkpoint["best_network_params"]
-            return checkpoint["epoch"], checkpoint["best_res"]
+            # return checkpoint["epoch"], checkpoint["best_res"]
+            return 0, {}
         else:
             print(f"No checkpoint found in {self.checkpoint_dir}", __name__)
             self.best_params = self.state_dict()

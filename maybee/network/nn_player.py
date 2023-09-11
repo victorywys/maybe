@@ -9,7 +9,8 @@ from .encoder import SelfInfoEncoder, RecordEncoder, GlobalInfoEncoder
 class MahjongPlayer(nn.Module):
     def __init__(self):
         super(MahjongPlayer, self).__init__()
-        action_dim = 47
+        # action_dim = 47
+        action_dim = 54
         self.self_info_encoder = SelfInfoEncoder()
         self.record_encoder = RecordEncoder()
         self.global_info_encoder = GlobalInfoEncoder()

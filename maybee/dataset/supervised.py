@@ -14,6 +14,20 @@ import pandas as pd
 from itertools import chain
 import gc
 
+import threading 
+
+
+def preload_file(file_ids, file_names, cache, lock):
+    with lock:
+        for idx in file_ids:
+            if idx >= len(file_names) or idx in cache:
+                continue
+            file_name = file_names[idx]
+            cache[idx] = pd.read_pickle(file_name)
+            # delete the earliest file
+            if len(cache) > 5:
+                del cache[min(cache.keys())]
+    
 
 @DATASET.register_module("supervised")
 class SupervisedDataset(Dataset):
@@ -41,6 +55,7 @@ class SupervisedDataset(Dataset):
         self.build_start_end_idx()
         self.file_cache = {}
         self.CACHE_SIZE = 3
+        self.cache_lock = threading.Lock()
         self.RECORD_PAD = torch.zeros(1, 55)
         
     def build_start_end_idx(self):
@@ -78,14 +93,18 @@ class SupervisedDataset(Dataset):
         for i, (start, end) in enumerate(self.start_end_idx):
             if start <= idx < end:
                 file_id = i
+                next_file_id_start = i + 1
+                next_file_id_end = i + 4
                 break
         data_id = idx - self.start_end_idx[file_id][0]
 
+        if not (min(next_file_id_end, len(self.start_end_idx) - 1) in self.file_cache) and (data_id == 0):
+            self.thread = threading.Thread(target=preload_file, args=(list(range(next_file_id_start, next_file_id_end)), self.data_files, self.file_cache, self.cache_lock))
+            self.thread.start()
+
         if file_id not in self.file_cache:
-            self.file_cache[file_id] = pd.read_pickle(self.data_files[file_id])
-            # delete the earliest file
-            if len(self.file_cache) > self.CACHE_SIZE:
-                del self.file_cache[min(self.file_cache.keys())]
+            with self.cache_lock:
+                self.file_cache[file_id] = pd.read_pickle(self.data_files[file_id])
             
         return self.get_item(self.file_cache[file_id], data_id)
 

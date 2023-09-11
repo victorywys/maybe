@@ -1,25 +1,35 @@
 PLAYER_OBS_DIM = 93
 ORACLE_OBS_DIM = 18
-ACTION_DIM = 47
+ACTION_DIM = 54
 MAHJONG_TILE_TYPES = 34
 INIT_POINTS = 25000
 
 # ACTION INDICES
-CHILEFT = 34
-CHIMIDDLE = 35
-CHIRIGHT = 36
-PON = 37
-ANKAN = 38
-MINKAN = 39
-KAKAN = 40
+DISCARD_0M = 34
+DISCARD_0P = 35
+DISCARD_0S = 36
 
-RIICHI = 41
-RON = 42
-TSUMO = 43
-PUSH = 44
+CHILEFT = 37
+CHIMIDDLE = 38
+CHIRIGHT = 39
+CHILEFT_AKA = 40
+CHIMIDDLE_AKA = 41
+CHIRIGHT_AKA = 42
+PON = 43
+PON_AKA = 44
+ANKAN = 45
+MINKAN = 46
+KAKAN = 47
 
-PASS_RESPONSE = 46
-PASS_RIICHI = 45
+RIICHI = 48
+RON = 49
+TSUMO = 50
+PUSH = 51
+
+PASS_RIICHI = 52
+PASS_RESPONSE = 53
+
+aka_tile_ints = [16, 16 + 36, 16 + 36 + 36]
 
 class MahjongException(Exception):
     pass
@@ -58,6 +68,8 @@ def decodem(naru_tiles_int, naru_player_id):
     # ---------------------------------
     binaries = bin(naru_tiles_int)[2:]
 
+    naru_is_aka = False # 被鸣的牌是不是aka
+    use_aka_to_naru = False # 用来鸣牌的牌是不是aka
     opened = True
 
     if len(binaries) < 16:
@@ -102,7 +114,21 @@ def decodem(naru_tiles_int, naru_player_id):
             if kk != which_naru:
                 hand_tiles_removed.append(ss[0])
 
+        if side_tiles_added[which_naru][0] in aka_tile_ints:
+            # print("Chi Aka!!!")
+            # print(bit3_4, bit5_6, bit7_8)
 
+            naru_is_aka = True
+
+            # print(UNICODE_TILES[start_tile_id], UNICODE_TILES[start_tile_id + 1], UNICODE_TILES[start_tile_id + 2])
+            # print(UNICODE_TILES[start_tile_id + which_naru])
+
+        ##### To judge aka, trace previous discarded tile !
+        
+        for tile, is_naru in side_tiles_added:
+            if not is_naru and tile in aka_tile_ints:
+                use_aka_to_naru = True
+            
     else:
         naru_type = "Pon"
 
@@ -123,10 +149,19 @@ def decodem(naru_tiles_int, naru_player_id):
 
             side_tiles_added[which_naru][1] = 1
 
+            if side_tiles_added[which_naru][0] in aka_tile_ints:
+                # print("Pon, Aka!!!")
+                naru_is_aka = True
+                # print(UNICODE_TILES[pon_tile_id], UNICODE_TILES[pon_tile_id], UNICODE_TILES[pon_tile_id])
+
             hand_tiles_removed = []
             for kk, ss in enumerate(side_tiles_added):
                 if kk != which_naru:
                     hand_tiles_removed.append(ss[0])
+                    
+            for tile, is_naru in side_tiles_added:
+                if not is_naru and tile in aka_tile_ints:
+                    use_aka_to_naru = True
 
         else:  # An-Kan, Min-Kan, Ka-Kan
 
@@ -140,6 +175,9 @@ def decodem(naru_tiles_int, naru_player_id):
                 kan_tile_id = int(bit9_15 / 3)
 
                 side_tiles_added = [[kan_tile_id * 4 + which_kan, 1]]
+
+                if (kan_tile_id * 4 + which_kan) in aka_tile_ints:
+                    naru_is_aka = True
 
                 hand_tiles_removed = [kan_tile_id * 4 + which_kan]
 
@@ -171,7 +209,7 @@ def decodem(naru_tiles_int, naru_player_id):
                         if kk != which_kan:
                             hand_tiles_removed.append(ss[0])
 
-    return side_tiles_added, hand_tiles_removed, naru_type, opened
+    return side_tiles_added, hand_tiles_removed, naru_is_aka, use_aka_to_naru, naru_type, opened
 
 def game_round(game_order, honba):
     winds = "东南西北"

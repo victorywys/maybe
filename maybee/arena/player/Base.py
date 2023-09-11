@@ -21,6 +21,8 @@ class Statistics():
     total_furi: int = 0
     total_notile: int = 0
     total_notile_tenpai: int = 0
+    total_riichi: int = 0
+    total_menzen: int = 0
     agali_scores: List = field(
         default_factory=lambda: []
     )
@@ -39,6 +41,10 @@ class Statistics():
 
     def update(self, t: pm.Table, player_id: int):
         self.total_games += 1
+        if t.players[player_id].is_riichi():
+            self.total_riichi += 1
+        if t.players[player_id].is_menzen():
+            self.total_menzen += 1
         result = t.get_result()
         result_type = result.result_type
         if result_type == pm.ResultType.TsumoAgari:
@@ -80,15 +86,19 @@ class Statistics():
         elif result_type == pm.ResultType.NoTileRyuuKyoku:
             # TODO: add no tile ryuukyoku tenpai and noten
             self.total_notile += 1
-
+            if t.players[player_id].is_tenpai():
+                self.total_notile_tenpai += 1
 
     def dump_stats(self):
         lines = [
             f"总局数：{self.total_games}",
             f"和牌率：{float(self.total_agali) / self.total_games * 100:.2f}%",
-            f"自摸率：{float(self.total_tsumo) / self.total_games * 100:.2f}%",
+            f"自摸率：{float(self.total_tsumo) / self.total_agali * 100:.2f}%",
             f"放铳率：{float(self.total_furi) / self.total_games * 100:.2f}%",
             f"流局率：{float(self.total_notile) / self.total_games * 100:.2f}%",
+            f"流局听牌率: {float(self.total_notile_tenpai) / self.total_notile * 100:.2f}%",
+            f"立直率：{float(self.total_riichi) / self.total_games * 100:.2f}%",
+            f"副露率：{(1 - float(self.total_menzen) / self.total_games) * 100:.2f}%",
             f"平均和牌点数：{np.mean(self.agali_scores) if len(self.agali_scores) > 0 else 0.:.2f}",
             f"平均放铳点数：{np.mean(self.furi_scores) if len(self.furi_scores) > 0 else 0.:.2f}",
             f"役种："

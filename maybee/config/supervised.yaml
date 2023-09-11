@@ -1,6 +1,6 @@
 data:
   type: supervised
-  root_dir: /Data/yansen/mahjong/supervised_fixed
+  root_dir: /Data/yansen/mahjong/supervised_dqa
 
 network:
   type: MahjongPlayer

@@ -34,7 +34,7 @@ if __name__ == "__main__":
     ]
 
     env = MahjongEnv()
-    num_games = 50000
+    num_games = 100
 
     start_time = time.time()
     game = 0

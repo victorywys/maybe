@@ -293,11 +293,13 @@ class PaipuReplay:
                             raise ActionException('立直打牌', paipu, game_order, honba)
                     else:
                         selection = replayer.get_selection_from_action(BaseAction.Discard, [discarded_tile])
+                        # print("selection:", selection, "disarded_tile:", discarded_tile)
                         self.log(f'Select: {selection}')
 
                         self.data_recorder.before_selection(replayer.table, main_player_no)
                         aval_actions = replayer.table.get_self_actions()
                         made_action = aval_actions[selection]
+                        # print("actions:", [action.to_string() for action in aval_actions], selection, made_action)
                         ret = replayer.make_selection(selection)
                         self.data_recorder.make_selection(replayer.table, main_player_no, made_action=made_action)
 
@@ -313,7 +315,7 @@ class PaipuReplay:
                     naru_tiles_int = int(child.get("m"))
 
                     # self.log("==========  Naru =================")
-                    side_tiles_added_by_naru, hand_tiles_removed_by_naru, naru_type, opened = decodem(
+                    side_tiles_added_by_naru, hand_tiles_removed_by_naru, naru_is_aka, use_aka_to_naru, naru_type, opened = decodem(
                         naru_tiles_int, naru_player_id)
 
                     # opened = True表示是副露，否则是暗杠
@@ -330,7 +332,8 @@ class PaipuReplay:
                                 made_action = aval_actions[0]
                                 replayer.make_selection(0)
                                 self.data_recorder.make_selection(replayer.table, main_player_no,
-                                                                     made_action=made_action)
+                                                                    made_action=made_action,
+                                                                    use_aka_to_naru=use_aka_to_naru)
 
                         # else: #自己暗杠或者鸣牌
                         if i == naru_player_id:
@@ -376,7 +379,8 @@ class PaipuReplay:
                             made_action = aval_actions[selection]
                             ret = replayer.make_selection(selection)
                             self.data_recorder.make_selection(replayer.table, main_player_no,
-                                                                 made_action=made_action, chi_info=chi_info)
+                                                                 made_action=made_action, chi_info=chi_info,
+                                                                 use_aka_to_naru=use_aka_to_naru)
 
                             if not ret:
                                 self.log(f'要{naru_type} {get_tiles_from_id(hand_tiles_removed_by_naru)}, Fail.\n'
@@ -730,8 +734,8 @@ def run_recorder(batch_id):
     part = batch_id // 12
     batch_id = f"2020{month:02d}"
     print(batch_id, part)
-    data_recorder = SupervisedRecorder(save_path=f"/Data/yansen/mahjong/supervised_fixed/2020/{batch_id}/{part}")
-    paipu_replay(data_recorder, os.path.join("/home/yasenwang/code/mahjong_ai/maybee/scripts/paipuxmls", f"{batch_id}"), part, mode='mark')
+    data_recorder = SupervisedRecorder(save_path=f"/Data/yansen/mahjong/supervised_dqa/2020/{batch_id}/{part}")
+    paipu_replay(data_recorder, os.path.join("/home/yasenwang/code/mahjong_ai/maybee/maybee/scripts/paipuxmls", f"{batch_id}"), part, mode='mark')
     data_recorder.save()
 
 if __name__ == "__main__":

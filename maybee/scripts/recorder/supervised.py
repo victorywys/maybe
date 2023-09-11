@@ -1,5 +1,5 @@
 import pymahjong as pm
-from pymahjong import BaseAction
+from pymahjong import BaseAction, BaseTile
 
 from copy import deepcopy
 
@@ -10,31 +10,30 @@ import pandas as pd
 
 import os
 
-ACTION_DIM = 47
 RECORD_DIM = 55
 
 class SupervisedRecorder():
     def __init__(self, save_path="./data/supervised"):
         self.save_path = save_path
-        
+
         self.record_this_game = True
-        
+
         self.self_infos = []
         self.records = []
         self.global_infos = []
         self.actions = []
         self.action_mask = []
-        
+
         self.act_container = np.zeros([ACTION_DIM], dtype=np.int8)
         self.batch_num = 0
         self._max_allowed_samples = 50000
         self.curr_player = -1
-        
+
     def init(self, replayer):
         self.te = pm.TableEncoder(replayer.table)
         self.te.init()
         self.te.update()
-        
+
     def check_capacity(self):
         assert len(self.self_infos) == len(self.records) == len(self.global_infos) == len(self.actions) == len(self.action_mask), \
         "Lengths of self_infos, records, global_infos, actions, action_mask are not equal.\n"
@@ -48,7 +47,7 @@ class SupervisedRecorder():
             self.global_infos = []
             self.actions = []
             self.action_mask = []
-    
+
     def end_episode(self, main_player_payoff):
         if self.record_this_game:
             self.check_capacity()
@@ -61,8 +60,8 @@ class SupervisedRecorder():
         self.global_infos.pop()
         self.self_infos.pop()
         self.records.pop()
-    
-    def make_selection(self, table, pid, made_action, chi_info=None):
+
+    def make_selection(self, table, pid, made_action, chi_info=None, use_aka_to_naru=False):
         if self.record_this_game and len(self.aval_actions) > 1 and self.curr_player == pid:
             if len(self.riichi_tiles) > 0 and table.get_selected_action_tile() is not None and \
                     table.get_selected_action_tile().tile in self.riichi_tiles and \
@@ -70,7 +69,7 @@ class SupervisedRecorder():
                 # 2-stages riichi
                 # FIXME: in state encoding v2, if we're using 2-stage riichi for supervised learning,
                 #  then it seems that the tile selection action and the riichi action share the same state
-                #  it might cause the problem where the same x corresponds to different ys. 
+                #  it might cause the problem where the same x corresponds to different ys.
                 action = int(table.get_selected_action_tile().tile)  # first discard the tile
                 self.actions.append(action)
                 self.before_selection(table, pid, riichi_step2_tile=action)  # step += 1
@@ -85,20 +84,31 @@ class SupervisedRecorder():
                 if made_action.action == BaseAction.Pass:
                     action = PASS_RESPONSE
                 elif made_action.action == BaseAction.Discard:
-                    action = int(table.get_selected_action_tile().tile)
+                    tile = table.get_selected_action_tile()
+                    if tile.red_dora:
+                        if tile.tile == BaseTile._5m:
+                            action = DISCARD_0M
+                        elif tile.tile == BaseTile._5p:
+                            action = DISCARD_0P
+                        elif tile.tile == BaseTile._5s:
+                            action = DISCARD_0S
+                        else:
+                            raise MahjongException("============ 不能判断红宝牌是哪个 ==============")
+                    else:
+                        action = int(tile.tile)
                 elif made_action.action == BaseAction.Chi:
                     if chi_info == 'left':
-                        action = CHILEFT
+                        action = CHILEFT_AKA if use_aka_to_naru else CHILEFT
                     elif chi_info == 'middle':
-                        action = CHIMIDDLE
+                        action = CHIMIDDLE_AKA if use_aka_to_naru else CHIMIDDLE
                     elif chi_info == 'right':
-                        action = CHIRIGHT
+                        action = CHIRIGHT_AKA if use_aka_to_naru else CHIRIGHT
                     else:
                         self.drop_last_obs()
                         raise MahjongException("============ 不能判断吃哪个 ==============")
 
                 elif made_action.action == BaseAction.Pon:
-                    action = PON
+                    action = PON_AKA if use_aka_to_naru else PON
                 elif made_action.action == BaseAction.AnKan:
                     action = ANKAN
                 elif made_action.action == BaseAction.Kan:
@@ -132,9 +142,9 @@ class SupervisedRecorder():
             if self.action_mask[-1][action] != 1:
                 print("============  self.m[self.step, self.a[self.step]] != 1 ==============")
                 print("made action = ", made_action.to_string())
-                print("action = ", self.a[self.step])
-                print("mask = ", self.m[self.step])
-                print("allowed actions = ", [action_i for action_i in range(self.m[self.step].shape[-1]) if self.m[self.step][action_i]])
+                print("action = ", action)
+                print("mask = ", self.action_mask[-1])
+                print("allowed actions = ", [action_i for action_i in range(self.action_mask[-1].shape[-1]) if self.action_mask[-1][action_i]])
                 print("phase = ", table.get_phase())
                 print("current player =", self.curr_player)
                 print(table.get_selected_base_action())
@@ -153,7 +163,7 @@ class SupervisedRecorder():
                 raise MahjongException("========== Wrong action encoding!! ================")
 
             self.actions.append(action)
-    
+
     def before_selection(self, table, pid, riichi_step2_tile=None):
         self.te.update()
         if self.record_this_game:
@@ -189,13 +199,15 @@ class SupervisedRecorder():
                 self.global_infos.append(global_info)
                 self.records.append(record)
                 self.action_mask.append(self.act_container)
-    
+
     def pad_record(self):
         max_len = max([len(record) for record in self.records])
         for i in range(len(self.records)):
             self.records[i] = np.pad(self.records[i], ((0, max_len - len(self.records[i])), (0, 0)))
 
-    def save(self, path="./data/supervised"):
+    def save(self, path=None):
+        if path is None:
+            path = self.save_path
         data = {}
         data["self_info"] = np.stack(self.self_infos)
         data["global_info"] = np.stack(self.global_infos)
