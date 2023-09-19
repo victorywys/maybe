@@ -9,7 +9,7 @@ model:
   type: SupervisedMahjong
   batch_size: 2048
   save_interval: 10000
-  num_worker: 0
+  num_worker: 8
 
 runtime:
   seed: 32000

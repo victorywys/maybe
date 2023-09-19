@@ -66,6 +66,7 @@ class SupervisedMahjong(nn.Module):
             collate_fn=supervised_collate_fn,
             pin_memory=True,
             num_workers=self.num_workers,
+            prefetch_factor=2,
         )
         start_epoch, best_res = self._resume()
         
@@ -140,6 +141,7 @@ class SupervisedMahjong(nn.Module):
             collate_fn=supervised_collate_fn,
             pin_memory=True,
             num_workers=self.num_workers,
+            prefetch_factor=2,
         )
         start_time = time.time()
         total_num = 0.
@@ -209,8 +211,7 @@ class SupervisedMahjong(nn.Module):
             self.optimizer.load_state_dict(checkpoint["optim"])
             self.best_params = checkpoint["best_params"]
             self.best_network_params = checkpoint["best_network_params"]
-            # return checkpoint["epoch"], checkpoint["best_res"]
-            return 0, {}
+            return checkpoint["epoch"], checkpoint["best_res"]
         else:
             print(f"No checkpoint found in {self.checkpoint_dir}", __name__)
             self.best_params = self.state_dict()

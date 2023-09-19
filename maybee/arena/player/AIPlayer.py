@@ -22,16 +22,7 @@ class SupervisedPlayer(BasePlayer):
         ):
         super().__init__(name)
         self.model = MahjongPlayer()
-        params = torch.load(weight_path)["model"]
-        
-        params_wo_network = OrderedDict()
-        for k, v in params.items():
-            if k.startswith("network."):
-                params_wo_network[k[8:]] = v
-            else:
-                params_wo_network[k] = v
-        self.model.load_state_dict(params_wo_network)
-        # self.model.load_state_dict(torch.load(weight_path)["best_network_params"])
+        self.model.load_state_dict(torch.load(weight_path)["best_network_params"])
         self.gpu = gpu
         if gpu is not None:
             self.model.to(gpu)

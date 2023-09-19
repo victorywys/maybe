@@ -23,10 +23,10 @@ ju_to_human = ["东一局", "东二局", "东三局", "东四局", "南一局", 
 human_to_tile = {
     tile: i for i, tile in enumerate(tile_to_human)
 }
-# FIXME: currently only support discard non-red-akad tile first
-human_to_tile["0m"] = 4
-human_to_tile["0p"] = 13
-human_to_tile["0s"] = 22
+
+# human_to_tile["0m"] = 4
+# human_to_tile["0p"] = 13
+# human_to_tile["0s"] = 22
 
 feng_to_human = ["东", "南", "西", "北"]
 human_to_action = {

@@ -2,7 +2,7 @@ from .base import DATASET
 
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, Sampler
+from torch.utils.data import Dataset, Sampler, get_worker_info
 
 import random
 
@@ -15,18 +15,19 @@ from itertools import chain
 import gc
 
 import threading 
+import time
 
-
-def preload_file(file_ids, file_names, cache, lock):
-    with lock:
-        for idx in file_ids:
-            if idx >= len(file_names) or idx in cache:
+def preload_file(file_ids, file_names, dataset, lock):
+    for idx in file_ids:
+        with lock:
+            if idx >= len(file_names) or idx in dataset.file_cache:
                 continue
             file_name = file_names[idx]
-            cache[idx] = pd.read_pickle(file_name)
+            dataset.file_cache[idx] = pd.read_pickle(file_name)
             # delete the earliest file
-            if len(cache) > 5:
-                del cache[min(cache.keys())]
+            if len(dataset.file_cache) > dataset.CACHE_SIZE:
+                del dataset.file_cache[min(dataset.file_cache.keys())]
+        time.sleep(0.1) # allow main thread to load data from cached file
     
 
 @DATASET.register_module("supervised")
@@ -54,6 +55,7 @@ class SupervisedDataset(Dataset):
         
         self.build_start_end_idx()
         self.file_cache = {}
+        self.last_file_id = -1
         self.CACHE_SIZE = 3
         self.cache_lock = threading.Lock()
         self.RECORD_PAD = torch.zeros(1, 55)
@@ -74,10 +76,11 @@ class SupervisedDataset(Dataset):
     def data_num(self):
         return self.start_end_idx[-1][1]
 
-    def suffle_file_name(self):
+    def shuffle_file_name(self):
         random.shuffle(self.data_files)
         self.build_start_end_idx()
         self.file_cache = {}
+        self.last_file_id = -1
         gc.collect()
 
 
@@ -90,21 +93,29 @@ class SupervisedDataset(Dataset):
         )
 
     def __getitem__(self, idx):
-        for i, (start, end) in enumerate(self.start_end_idx):
-            if start <= idx < end:
-                file_id = i
-                next_file_id_start = i + 1
-                next_file_id_end = i + 4
-                break
+        new_file = False
+        if self.last_file_id < 0:
+            file_id = self.last_file_id = 0
+            new_file = True
+        else:
+            while self.last_file_id < len(self.start_end_idx) - 1 and idx >= self.start_end_idx[self.last_file_id + 1][0]:
+                self.last_file_id += 1
+                new_file = True
+            file_id = self.last_file_id
+        
+        next_file_id_start = file_id
+        next_file_id_end = file_id + self.CACHE_SIZE
+
         data_id = idx - self.start_end_idx[file_id][0]
 
-        if not (min(next_file_id_end, len(self.start_end_idx) - 1) in self.file_cache) and (data_id == 0):
-            self.thread = threading.Thread(target=preload_file, args=(list(range(next_file_id_start, next_file_id_end)), self.data_files, self.file_cache, self.cache_lock))
-            self.thread.start()
+        if not (min(next_file_id_end, len(self.start_end_idx) - 1) in self.file_cache) and (new_file):
+            thread = threading.Thread(target=preload_file, args=(list(range(next_file_id_start, next_file_id_end)), self.data_files, self, self.cache_lock))
+            thread.start()
 
         if file_id not in self.file_cache:
             with self.cache_lock:
-                self.file_cache[file_id] = pd.read_pickle(self.data_files[file_id])
+                if file_id not in self.file_cache:
+                    self.file_cache[file_id] = pd.read_pickle(self.data_files[file_id])
             
         return self.get_item(self.file_cache[file_id], data_id)
 
@@ -131,7 +142,7 @@ class MultiFileSampler(Sampler):
 
     def __iter__(self):
         if self.random:
-            self.dataset.suffle_file_name()
+            self.dataset.shuffle_file_name()
             return chain(*[RandomPerm(start, end) for start, end in self.dataset.start_end_idx])
         else:
             self.dataset.file_cache = {}
