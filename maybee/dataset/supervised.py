@@ -22,6 +22,7 @@ def preload_file(file_ids, file_names, dataset, lock):
         with lock:
             if idx >= len(file_names) or idx in dataset.file_cache:
                 continue
+            print("caching idx", idx)
             file_name = file_names[idx]
             dataset.file_cache[idx] = pd.read_pickle(file_name)
             # delete the earliest file

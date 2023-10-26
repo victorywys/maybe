@@ -6,6 +6,7 @@ maybee/train_supervised.py
 maybee.egg-info/PKG-INFO
 maybee.egg-info/SOURCES.txt
 maybee.egg-info/dependency_links.txt
+maybee.egg-info/requires.txt
 maybee.egg-info/top_level.txt
 maybee/arena/__init__.py
 maybee/arena/common.py

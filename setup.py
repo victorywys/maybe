@@ -7,6 +7,12 @@ setup(
     install_requires=[
         # List your package's dependencies here, e.g.,
         # 'numpy>=1.10',
+        'torch>=2.0',
+        'utilsd',
+        'pandas',
+        'scipy',
+        'tqdm',
+        'joblib',
     ],
     # other metadata like author, license, etc.
     author='RiichiUra3',

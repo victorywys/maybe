@@ -19,7 +19,7 @@ import pymahjong as mp
 from pymahjong import BaseAction
 
 from utils import *
-from recorder import BaseRecorder, RLDataRecorderV1, NullRecorder, SupervisedRecorder
+from recorder import BaseRecorder, RLDataRecorderV1, NullRecorder, SupervisedRecorder, TenpaiRecorder
 
 import joblib
 # eventlet.monkey_patch()
@@ -734,9 +734,10 @@ def run_recorder(batch_id):
     part = batch_id // 12
     batch_id = f"2020{month:02d}"
     print(batch_id, part)
-    data_recorder = SupervisedRecorder(save_path=f"/Data/yansen/mahjong/supervised_dqa/2020/{batch_id}/{part}")
-    paipu_replay(data_recorder, os.path.join("/home/yasenwang/code/mahjong_ai/maybee/maybee/scripts/paipuxmls", f"{batch_id}"), part, mode='mark')
+    data_recorder = TenpaiRecorder(save_path=f"/data/yansen/mahjong/tenpai_info/2020/{batch_id}/{part}/")
+    paipu_replay(data_recorder, os.path.join("/data/yansen/mahjong/paipuxmls/", f"{batch_id}"), part, mode='mark')
     data_recorder.save()
 
 if __name__ == "__main__":
     joblib.Parallel(n_jobs=48)(joblib.delayed(run_recorder)(batch_id) for batch_id in range(48))
+    # run_recorder(0)

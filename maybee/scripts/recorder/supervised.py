@@ -93,6 +93,7 @@ class SupervisedRecorder():
                         elif tile.tile == BaseTile._5s:
                             action = DISCARD_0S
                         else:
+                            self.drop_last_obs()
                             raise MahjongException("============ 不能判断红宝牌是哪个 ==============")
                     else:
                         action = int(tile.tile)
