@@ -734,7 +734,7 @@ def run_recorder(batch_id):
     part = batch_id // 12
     batch_id = f"2020{month:02d}"
     print(batch_id, part)
-    data_recorder = TenpaiRecorder(save_path=f"/data/yansen/mahjong/tenpai_info/2020/{batch_id}/{part}/")
+    data_recorder = TenpaiRecorder(save_path=f"/data/yansen/mahjong/supervised_v2/2020/{batch_id}/{part}/")
     paipu_replay(data_recorder, os.path.join("/data/yansen/mahjong/paipuxmls/", f"{batch_id}"), part, mode='mark')
     data_recorder.save()
 

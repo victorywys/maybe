@@ -1,17 +1,19 @@
 data:
-  type: supervised
+  type: tenpai
   root_dir: /data/yansen/mahjong/supervised_v2/
 
 network:
-  type: MahjongPlayer
+  type: TenpaiPred
 
 model: 
   type: SupervisedMahjong
-  batch_size: 4096
+  task: binary
+  batch_size: 2048
   save_interval: 10000
-  num_worker: 8
+  num_worker: 0
 
 runtime:
   seed: 32000
-  output_dir: "./output/supervised_player"
+  output_dir: "./output/test_tenpai"
   debug: False
+  gpu: 1

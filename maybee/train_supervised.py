@@ -2,6 +2,8 @@ from utilsd import setup_experiment, get_output_dir, get_checkpoint_dir
 from utilsd.config import configclass, RegistryConfig, RuntimeConfig, PythonConfig
 from utilsd.experiment import print_config
 
+from dataclasses import field
+
 from dataset import DATASET
 from model import MODEL
 from network import NETWORK
@@ -12,7 +14,7 @@ class SupervisedMahjongConfig(PythonConfig):
     data: RegistryConfig[DATASET]
     network: RegistryConfig[NETWORK]
     model: RegistryConfig[MODEL]
-    runtime: RuntimeConfig = RuntimeConfig()
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
 
 def run_supervised(config):

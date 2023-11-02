@@ -27,6 +27,7 @@ class SupervisedMahjong(nn.Module):
         batch_size: int = 256,
         num_worker: int = 8,
         max_epochs: int = 100,
+        task: str = "classification",
         save_interval: Optional[int] = None,
         network: Optional[nn.Module] = None,
         output_dir: Optional[str] = None,
@@ -38,7 +39,7 @@ class SupervisedMahjong(nn.Module):
         self.max_epochs = max_epochs
         self.network = network
         self.save_interval = save_interval
-        self._init_optimization(lr, weight_decay)
+        self._init_optimization(task, lr, weight_decay)
         self._init_logger(output_dir)
         self.checkpoint_dir = checkpoint_dir
         if not os.path.isdir(self.checkpoint_dir):
@@ -51,22 +52,28 @@ class SupervisedMahjong(nn.Module):
         self.writer = SummaryWriter(log_dir=log_dir)
         self.writer.flush()
 
-    def _init_optimization(self, lr, weight_decay):
-        self.loss_fn = nn.CrossEntropyLoss()
+    def _init_optimization(self, task, lr, weight_decay):
+        if task == "classification":
+            self.loss_fn = nn.CrossEntropyLoss()
+        elif task == "binary":
+            self.loss_fn = nn.BCEWithLogitsLoss(reduction="none")
+        else:
+            raise ValueError(f"Unrecognized task type: {task}, expected one of [classification, binary]")
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
 
     def forward(self, self_info, record, global_info):
         return self.network(self_info, record, global_info)
 
     def fit(self, trainset, validset=None):
+        sampler_class = trainset.default_sampler_class or MultiFileSampler
+        collate_fn = trainset.default_collate_fn or supervised_collate_fn
         loader = DataLoader(
             trainset,
             batch_size=self.batch_size,
-            sampler=MultiFileSampler(trainset),
-            collate_fn=supervised_collate_fn,
+            sampler=sampler_class(trainset),
+            collate_fn=collate_fn,
             pin_memory=True,
             num_workers=self.num_workers,
-            prefetch_factor=2,
         )
         start_epoch, best_res = self._resume()
         
@@ -78,21 +85,39 @@ class SupervisedMahjong(nn.Module):
             total_correct = 0.
             
             with tqdm(total=len(loader), desc=f"Epoch {epoch}") as pbar:
-                for batch_i, (self_info, record, global_info, label) in enumerate(loader):
+                for batch_i, (self_info, record, global_info, *label) in enumerate(loader):
+                    if len(label) > 1:
+                        label, label_mask = label
+                    else:
+                        label = label[0]
+                        label_mask = None
                     if use_cuda():
                         self_info = self_info.cuda()
                         record = record.cuda()
                         global_info = global_info.cuda()
                         label = label.cuda()
+                        if label_mask is not None:
+                            label_mask = label_mask.cuda()
+                            
                     self.optimizer.zero_grad()
                     output = self(self_info, record, global_info)
-                    loss = self.loss_fn(output, label)
+                    if label_mask is not None:
+                        loss = self.loss_fn(output, label)
+                        loss = torch.mean(loss[label_mask])
+                    else:
+                        loss = self.loss_fn(output, label)
+                    
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
                     self.optimizer.step()
-                    total_loss += loss.item() * self_info.size(0)
-                    total_num += self_info.size(0)
-                    total_correct += (output.argmax(dim=1) == label).sum().item()
+                    if label_mask is not None:
+                        total_loss += loss.item() * torch.sum(label_mask)
+                        total_num += torch.sum(label_mask)
+                        total_correct += ((output > 0.5) == label)[label_mask].sum().item()
+                    else:
+                        total_loss += loss.item() * self_info.size(0)
+                        total_num += self_info.size(0)
+                        total_correct += (output.argmax(dim=1) == label).sum().item()
                     pbar.set_postfix_str(f"loss: {loss.item():.4f}, acc: {total_correct / total_num:.4f}")
                     pbar.update(1)
                     if (batch_i + 1) % self.save_interval == 0:
@@ -134,28 +159,38 @@ class SupervisedMahjong(nn.Module):
                 
     def evaluate(self, evalset):
         self.eval()
+        sampler_class = evalset.default_sampler_class or MultiFileSampler
+        collate_fn = evalset.default_collate_fn or supervised_collate_fn
         loader = DataLoader(
             evalset,
             batch_size=self.batch_size,
-            sampler=MultiFileSampler(evalset, random=False),
-            collate_fn=supervised_collate_fn,
+            sampler=sampler_class(evalset, random=False),
+            collate_fn=collate_fn,
             pin_memory=True,
             num_workers=self.num_workers,
-            prefetch_factor=2,
         )
         start_time = time.time()
         total_num = 0.
         total_correct = 0.
         with tqdm(total=len(loader), desc="Evaluation") as pbar:
-            for _, (self_info, record, global_info, label) in enumerate(loader):
+            for _, (self_info, record, global_info, *label) in enumerate(loader):
+                if len(label) > 1:
+                    label, label_mask = label
+                else:
+                    label = label[0]
+                    label_mask = None
                 if use_cuda():
                     self_info = self_info.cuda()
                     record = record.cuda()
                     global_info = global_info.cuda()
                     label = label.cuda()
                 output = self(self_info, record, global_info)
-                total_num += self_info.size(0)
-                total_correct += (output.argmax(dim=1) == label).sum().item()
+                if label_mask is not None:
+                    total_num += torch.sum(label_mask)
+                    total_correct += ((output > 0.5) == label)[label_mask].sum().item()
+                else:
+                    total_num += self_info.size(0)
+                    total_correct += (output.argmax(dim=1) == label).sum().item()
                 pbar.set_postfix_str(f"acc: {total_correct / total_num:.4f}")
                 pbar.update(1)
         summary = {
@@ -167,17 +202,24 @@ class SupervisedMahjong(nn.Module):
 
     def predict(self, evalset):
         self.eval()
+        sampler_class = evalset.default_sampler_class or MultiFileSampler
+        collate_fn = evalset.default_collate_fn or supervised_collate_fn
         loader = DataLoader(
             evalset,
             batch_size=self.batch_size,
-            sampler=MultiFileSampler(evalset, random=False),
-            collate_fn=supervised_collate_fn,
+            sampler=sampler_class(evalset, random=False),
+            collate_fn=collate_fn,
             pin_memory=True,
             num_workers=self.num_workers,
         )
         output_list = []
         with tqdm(total=len(loader), desc="Prediction") as pbar:
-            for _, (self_info, record, global_info, label) in enumerate(loader):
+            for _, (self_info, record, global_info, *label) in enumerate(loader):
+                if len(label) > 1:
+                    label, label_mask = label
+                else:
+                    label = label[0]
+                    label_mask = None
                 if use_cuda():
                     self_info = self_info.cuda()
                     record = record.cuda()
@@ -190,6 +232,18 @@ class SupervisedMahjong(nn.Module):
     
 
     def _checkpoint(self, cur_epoch, best_res, checkpoint_dir=None):
+        torch.save(
+            {
+                "model": self.state_dict(),
+                "optim": self.optimizer.state_dict(),
+                "epoch": cur_epoch,
+                "best_res": best_res,
+                "best_params": self.best_params,
+                "best_network_params": self.best_network_params,
+            },
+            self.checkpoint_dir / "resume.pth" if checkpoint_dir is None else checkpoint_dir / f"resume_{cur_epoch}.pth",
+        )
+        print(f"Checkpoint saved to {self.checkpoint_dir / 'resume.pth' if checkpoint_dir is None else checkpoint_dir / f'resume_{cur_epoch}.pth'}", __name__)
         torch.save(
             {
                 "model": self.state_dict(),

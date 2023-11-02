@@ -84,7 +84,6 @@ class Statistics():
             # TODO: add nagashi mangan
             pass
         elif result_type == pm.ResultType.NoTileRyuuKyoku:
-            # TODO: add no tile ryuukyoku tenpai and noten
             self.total_notile += 1
             if t.players[player_id].is_tenpai():
                 self.total_notile_tenpai += 1
@@ -92,21 +91,57 @@ class Statistics():
     def dump_stats(self):
         lines = [
             f"总局数：{self.total_games}",
-            f"和牌率：{float(self.total_agali) / self.total_games * 100:.2f}%",
-            f"自摸率：{float(self.total_tsumo) / self.total_agali * 100:.2f}%",
-            f"放铳率：{float(self.total_furi) / self.total_games * 100:.2f}%",
-            f"流局率：{float(self.total_notile) / self.total_games * 100:.2f}%",
-            f"流局听牌率: {float(self.total_notile_tenpai) / self.total_notile * 100:.2f}%",
-            f"立直率：{float(self.total_riichi) / self.total_games * 100:.2f}%",
-            f"副露率：{(1 - float(self.total_menzen) / self.total_games) * 100:.2f}%",
-            f"平均和牌点数：{np.mean(self.agali_scores) if len(self.agali_scores) > 0 else 0.:.2f}",
-            f"平均放铳点数：{np.mean(self.furi_scores) if len(self.furi_scores) > 0 else 0.:.2f}",
+            f"和牌率：{self.agali_rate * 100:.2f}%",
+            f"自摸率：{self.tsumo_rate * 100:.2f}%",
+            f"放铳率：{self.furi_rate * 100:.2f}%",
+            f"流局率：{self.notile_rate * 100:.2f}%",
+            f"流局听牌率: {self.notile_tenpai_rate * 100:.2f}%",
+            f"立直率：{self.riichi_rate * 100:.2f}%",
+            f"副露率：{self.naki_rate * 100:.2f}%",
+            f"平均和牌点数：{self.mean_agali_score:.2f}",
+            f"平均放铳点数：{self.mean_furi_score:.2f}",
             f"役种："
         ] 
         for yaku in self.yakus:
             if self.yakus[yaku] != 0:
                 lines.append(f"\t{yaku_to_tenhou[yaku]}: {self.yakus[yaku]} ({float(self.yakus[yaku]) / self.total_games * 100:.2f}%)")
         return "\n".join(lines)
+    
+    @property
+    def agali_rate(self):
+        return float(self.total_agali) / self.total_games if self.total_games != 0 else 0.
+    
+    @property
+    def furi_rate(self):
+        return float(self.total_furi) / self.total_games if self.total_games != 0 else 0.
+    
+    @property
+    def tsumo_rate(self):
+        return float(self.total_tsumo) / self.total_agali if self.total_agali != 0 else 0.
+    
+    @property
+    def notile_rate(self):
+        return float(self.total_notile) / self.total_games if self.total_games != 0 else 0.
+    
+    @property
+    def notile_tenpai_rate(self):
+        return float(self.total_notile_tenpai) / self.total_notile if self.total_notile != 0 else 0.
+    
+    @property
+    def riichi_rate(self):
+        return float(self.total_riichi) / self.total_games if self.total_games != 0 else 0.
+    
+    @property
+    def naki_rate(self):
+        return 1 - float(self.total_menzen) / self.total_games if self.total_games != 0 else 0.
+    
+    @property
+    def mean_agali_score(self):
+        return np.mean(self.agali_scores) if len(self.agali_scores) > 0 else 0.
+    
+    @property
+    def mean_furi_score(self):
+        return np.mean(self.furi_scores) if len(self.furi_scores) > 0 else 0.
 
 
 @PLAYER.register_module(name="base")

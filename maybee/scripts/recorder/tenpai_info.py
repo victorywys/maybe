@@ -3,6 +3,8 @@ import numpy as np
 import os
 import pandas as pd
 
+from copy import deepcopy
+
 
 TENPAI_DIM = 34 # 1~9m, 1~9p, 1~9s, 1~7z
 
@@ -63,13 +65,20 @@ class TenpaiRecorder(SupervisedRecorder):
     def save(self, path=None):
         if path is None:
             path = self.save_path
-            data = {}
-            data["shimocha_tenpai"] = np.stack(self.shimocha_tenpai)
-            data["toimen_tenpai"] = np.stack(self.toimen_tenpai)
-            data["kamicha_tenpai"] = np.stack(self.kamicha_tenpai)
-            if not os.path.isdir(path):
-                os.makedirs(path)
-            pd.to_pickle(data, os.path.join(path, f"tenpai_{self.batch_num}.pkl"))
-            print(f"batch saved to {os.path.join(path, f'tenpai_{self.batch_num}.pkl')}")
-            self.batch_num += 1
-            del data
+            
+        data = {}
+        data["shimocha_tenpai"] = np.stack(self.shimocha_tenpai)
+        data["toimen_tenpai"] = np.stack(self.toimen_tenpai)
+        data["kamicha_tenpai"] = np.stack(self.kamicha_tenpai)
+        data["self_info"] = np.stack(self.self_infos)
+        data["global_info"] = np.stack(self.global_infos)
+        # self.pad_record()
+        data["record"] = deepcopy(self.records)
+        data["action"] = np.array(self.actions)
+        data["action_mask"] = np.stack(self.action_mask)
+        if not os.path.isdir(path):
+            os.makedirs(path)
+        pd.to_pickle(data, os.path.join(path, f"supervised_v2_{self.batch_num}.pkl"))
+        print(f"batch saved to {os.path.join(path, f'supervised_v2_{self.batch_num}.pkl')}")
+        self.batch_num += 1
+        del data

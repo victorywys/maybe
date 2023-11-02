@@ -13,6 +13,7 @@ setup(
         'scipy',
         'tqdm',
         'joblib',
+        'tensorboard',
     ],
     # other metadata like author, license, etc.
     author='RiichiUra3',

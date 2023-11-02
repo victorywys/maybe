@@ -12,7 +12,6 @@ from arena.logger import TenhouJsonLogger
 from arena.player import PLAYER
 
 import torch
-
 import json
 
 

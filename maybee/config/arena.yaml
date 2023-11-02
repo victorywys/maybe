@@ -2,6 +2,7 @@ player1:
   type: supervised
   name: sup1
   weight_path: output/test_fixed/checkpoint/resume.pth
+  tenpai_pred_weight_path: output/test_tenpai/checkpoint/resume.pth
   gpu: 1
 
 player2:

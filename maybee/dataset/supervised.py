@@ -17,12 +17,13 @@ import gc
 import threading 
 import time
 
+
 def preload_file(file_ids, file_names, dataset, lock):
     for idx in file_ids:
         with lock:
             if idx >= len(file_names) or idx in dataset.file_cache:
                 continue
-            print("caching idx", idx)
+            # print("caching idx", idx)
             file_name = file_names[idx]
             dataset.file_cache[idx] = pd.read_pickle(file_name)
             # delete the earliest file
@@ -41,7 +42,7 @@ class SupervisedDataset(Dataset):
         ):
         self.data_files = list(glob.glob(os.path.join(root_dir, split, "*", "**", "*.pkl"), recursive=True))
         if debug:
-            self.data_files = self.data_files[:2]
+            self.data_files = self.data_files[:3]
         self.file_lengths = {}
         print("init dataset ...")
         if os.path.isfile(os.path.join(root_dir, split, "file_lengths.pkl")):
@@ -95,19 +96,24 @@ class SupervisedDataset(Dataset):
 
     def __getitem__(self, idx):
         new_file = False
-        if self.last_file_id < 0:
-            file_id = self.last_file_id = 0
-            new_file = True
-        else:
-            while self.last_file_id < len(self.start_end_idx) - 1 and idx >= self.start_end_idx[self.last_file_id + 1][0]:
-                self.last_file_id += 1
+        while True:
+            if self.last_file_id < 0:
+                file_id = self.last_file_id = 0
                 new_file = True
-            file_id = self.last_file_id
-        
-        next_file_id_start = file_id
-        next_file_id_end = file_id + self.CACHE_SIZE
+            else:
+                while self.last_file_id < len(self.start_end_idx) - 1 and idx >= self.start_end_idx[self.last_file_id + 1][0]:
+                    self.last_file_id += 1
+                    new_file = True
+                while self.last_file_id > 0 and idx < self.start_end_idx[self.last_file_id][0]:
+                    self.last_file_id -= 1
+                    new_file = True
+                file_id = self.last_file_id
+            next_file_id_start = file_id
+            next_file_id_end = file_id + self.CACHE_SIZE
+            data_id = idx - self.start_end_idx[file_id][0]
+            if self.start_end_idx[file_id][0] <= idx < self.start_end_idx[file_id][1]:
+                break
 
-        data_id = idx - self.start_end_idx[file_id][0]
 
         if not (min(next_file_id_end, len(self.start_end_idx) - 1) in self.file_cache) and (new_file):
             thread = threading.Thread(target=preload_file, args=(list(range(next_file_id_start, next_file_id_end)), self.data_files, self, self.cache_lock))
@@ -122,6 +128,14 @@ class SupervisedDataset(Dataset):
 
     def __len__(self):
         return self.data_num
+    
+    @property
+    def default_sampler_class(self):
+        return MultiFileSampler
+    
+    @property 
+    def default_collate_fn(self):
+        return supervised_collate_fn
 
 
 class RandomPerm():
