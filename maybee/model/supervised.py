@@ -241,9 +241,9 @@ class SupervisedMahjong(nn.Module):
                 "best_params": self.best_params,
                 "best_network_params": self.best_network_params,
             },
-            self.checkpoint_dir / "resume.pth" if checkpoint_dir is None else checkpoint_dir / f"resume_{cur_epoch}.pth",
+            self.checkpoint_dir / f"resume_{cur_epoch}.pth" if checkpoint_dir is None else checkpoint_dir / f"resume_{cur_epoch}.pth",
         )
-        print(f"Checkpoint saved to {self.checkpoint_dir / 'resume.pth' if checkpoint_dir is None else checkpoint_dir / f'resume_{cur_epoch}.pth'}", __name__)
+        print(f"Checkpoint saved to {self.checkpoint_dir / f'resume_{cur_epoch}.pth' if checkpoint_dir is None else checkpoint_dir / f'resume_{cur_epoch}.pth'}", __name__)
         torch.save(
             {
                 "model": self.state_dict(),

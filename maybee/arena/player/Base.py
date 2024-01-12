@@ -104,7 +104,7 @@ class Statistics():
         ] 
         for yaku in self.yakus:
             if self.yakus[yaku] != 0:
-                lines.append(f"\t{yaku_to_tenhou[yaku]}: {self.yakus[yaku]} ({float(self.yakus[yaku]) / self.total_games * 100:.2f}%)")
+                lines.append(f"\t{yaku_to_tenhou[yaku]}: {self.yakus[yaku]} ({float(self.yakus[yaku]) / self.total_agali * 100:.2f}%)")
         return "\n".join(lines)
     
     @property
@@ -163,6 +163,10 @@ class BasePlayer():
 
     def update_stats(self, t: pm.Table, player_id: int):
         self.stat.update(t, player_id)
+
+    def update_match_stats(self, match):
+        # TODO
+        pass    
 
     def dump_stats(self):
         return self.stat.dump_stats()

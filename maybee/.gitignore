@@ -1,6 +1,9 @@
 output/
 runs/
 
+.amltconfig
+logs.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

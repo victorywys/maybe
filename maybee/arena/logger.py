@@ -40,6 +40,7 @@ class TenhouJsonLogger():
         benchang = global_info[2]
         changgong = global_info[3]
         start_points = [p * 100 for p in global_info[6:10]]
+        print(ju, benchang, changgong, start_points)
         self.log.append([ju, benchang, changgong])
         self.log.append(start_points)
         self.start_hand = [[] for _ in range(4)]
@@ -270,8 +271,10 @@ class TenhouJsonLogger():
         te: pm.TableEncoder,
     ):
         score_last_round = [score * 100 for score in te.global_infos[0][6:10]]
-        
+        score_last_round = [score_last_round[0], score_last_round[3], score_last_round[2], score_last_round[1]]
+        print(score_last_round)
         result = t.get_result()
+        print(result.score)
         result_type = result.result_type
         if result_type == pm.ResultType.RonAgari:
             oya = t.oya
@@ -375,3 +378,11 @@ class TenhouJsonLogger():
             "log": self.logs,
         }
         return json.dumps(json_obj)
+    
+    def dump_urls(self):
+        return ['https://tenhou.net/6/#json=' + json.dumps({
+            'title': self.title,
+            'name': self.name,
+            'rule': self.rule,
+            'log': [log],
+        }, ensure_ascii=False, separators=(',', ':')) for log in self.logs]

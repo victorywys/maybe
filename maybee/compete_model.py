@@ -57,7 +57,7 @@ if __name__ == "__main__":
             te = pm.TableEncoder(env.t)
             te.init()
             te.update()
-            
+
             th_log.start_game(env.t, te)
 
             while not env.is_over():
@@ -66,7 +66,7 @@ if __name__ == "__main__":
                 obs = np.array(te.self_infos[curr_player_id]).reshape([18, 34]).swapaxes(0, 1)
                 rcd = np.array(te.records[curr_player_id])
                 gin = np.array(te.global_infos[curr_player_id])
-                
+
                 # --------- make decision -------------
                 a = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask)
 
@@ -102,7 +102,7 @@ if __name__ == "__main__":
             # print("-------------- replayable log -------------------------------")
             # env.t.print_debug_replay()
             continue
-    
+
     print("Total time: {:.2f}s".format(time.time() - start_time))
     print("Success games: {}".format(success_games))
     for i, p in enumerate(players):
