@@ -1,4 +1,6 @@
-from typing import List
+from typing import List, Optional
+
+import pandas as pd
 
 from dataclasses import dataclass, field
 from utilsd.config import Registry
@@ -8,6 +10,8 @@ import pymahjong as pm
 from pymahjong import Yaku
 from arena.common import yaku_to_tenhou
 
+import os
+
 
 class PLAYER(metaclass=Registry, name="player"):
     pass
@@ -15,6 +19,9 @@ class PLAYER(metaclass=Registry, name="player"):
 
 @dataclass
 class Statistics():
+    stat_path: str = None
+
+    # ---- game stats ----
     total_games: int = 0
     total_agali: int = 0
     total_tsumo: int = 0
@@ -34,6 +41,27 @@ class Statistics():
             yaku: 0 for yaku in yaku_to_tenhou
         }
     )
+
+    # ---- match stats ----
+    total_match: int = 0
+    total_1st: int = 0
+    scores_1st: List = field(
+        default_factory=lambda: []
+    )
+    total_2nd: int = 0
+    scores_2nd: List = field(
+        default_factory=lambda: []
+    )
+    total_3rd: int = 0
+    scores_3rd: List = field(
+        default_factory=lambda: []
+    )
+    total_4th: int = 0
+    scores_4th: List = field(
+        default_factory=lambda: []
+    )
+    total_strikeout: int = 0
+    rating: float = 1500.
 
     def update_yakus(self, yakus: List[Yaku]):
         for yaku in yakus:
@@ -88,8 +116,57 @@ class Statistics():
             if t.players[player_id].is_tenpai():
                 self.total_notile_tenpai += 1
 
+    def update_match(self, match, player_id):
+        if match.match_result["score"][player_id] < 0:
+            self.total_strikeout += 1
+        paired_score = zip(match.match_result["score"], range(4))
+        paired_score = sorted(paired_score, key=lambda x: x[0], reverse=True)
+        for i, (score, index) in enumerate(paired_score):
+            if index == player_id:
+                if i == 0:
+                    self.total_1st += 1
+                    self.scores_1st.append(score)
+                    rating_base = 30
+                elif i == 1:
+                    self.total_2nd += 1
+                    self.scores_2nd.append(score)
+                    rating_base = 10
+                elif i == 2:
+                    self.total_3rd += 1
+                    self.scores_3rd.append(score)
+                    rating_base = -10
+                elif i == 3:
+                    self.total_4th += 1
+                    self.scores_4th.append(score)
+                    rating_base = -30
+                break
+        # use tenhou rating system
+        num_match_modifier = (1 - self.total_match * 0.002) if self.total_match < 400 else 0.2
+        ave_rating = sum([player.stat.rating for player in match.players]) / 4
+        if ave_rating < 1500:
+            ave_rating = 1500
+        ave_rating_modifier = (ave_rating - self.rating) / 40
+        self.rating += num_match_modifier * (rating_base + ave_rating_modifier)
+
+        self.total_match += 1 
+
+
     def dump_stats(self):
         lines = [
+            f"------------",
+            f"总场数：{self.total_match}",
+            f"Rating: {self.rating:.2f}",
+            f"一位率：{self.match_1st_rate * 100:.2f}%",
+            f"二位率：{self.match_2nd_rate * 100:.2f}%",
+            f"三位率：{self.match_3rd_rate * 100:.2f}%",
+            f"四位率：{self.match_4th_rate * 100:.2f}%",
+            f"被飞率：{self.strikeout_rate * 100:.2f}%",
+            f"均点：{self.mean_score:.2f}",
+            f"一位均点：{self.mean_1st_score:.2f}",
+            f"二位均点：{self.mean_2nd_score:.2f}",
+            f"三位均点：{self.mean_3rd_score:.2f}",
+            f"四位均点：{self.mean_4th_score:.2f}",
+            f"------------",
             f"总局数：{self.total_games}",
             f"和牌率：{self.agali_rate * 100:.2f}%",
             f"自摸率：{self.tsumo_rate * 100:.2f}%",
@@ -100,6 +177,7 @@ class Statistics():
             f"副露率：{self.naki_rate * 100:.2f}%",
             f"平均和牌点数：{self.mean_agali_score:.2f}",
             f"平均放铳点数：{self.mean_furi_score:.2f}",
+            f"------------",
             f"役种："
         ] 
         for yaku in self.yakus:
@@ -107,6 +185,14 @@ class Statistics():
                 lines.append(f"\t{yaku_to_tenhou[yaku]}: {self.yakus[yaku]} ({float(self.yakus[yaku]) / self.total_agali * 100:.2f}%)")
         return "\n".join(lines)
     
+    def save_to_file(self, path=None):
+        pd.to_pickle(self, path or self.stat_path)
+       
+    @classmethod     
+    def load_from_file(cls, path=None) -> "Statistics":
+        return pd.read_pickle(path)
+
+    # ---- game properties ----
     @property
     def agali_rate(self):
         return float(self.total_agali) / self.total_games if self.total_games != 0 else 0.
@@ -143,16 +229,63 @@ class Statistics():
     def mean_furi_score(self):
         return np.mean(self.furi_scores) if len(self.furi_scores) > 0 else 0.
 
+    # ---- match properties ----
+    @property
+    def strikeout_rate(self):
+        return float(self.total_strikeout) / self.total_match if self.total_match != 0 else 0.
+
+    @property
+    def mean_score(self):
+        return np.mean(self.scores_1st + self.scores_2nd + self.scores_3rd + self.scores_4th) if len(self.scores_1st + self.scores_2nd + self.scores_3rd + self.scores_4th) > 0 else 0.
+
+    @property
+    def match_1st_rate(self):
+        return float(self.total_1st) / self.total_match if self.total_match != 0 else 0.
+    
+    @property
+    def mean_1st_score(self):
+        return np.mean(self.scores_1st) if len(self.scores_1st) > 0 else 0.
+
+    @property
+    def match_2nd_rate(self):
+        return float(self.total_2nd) / self.total_match if self.total_match != 0 else 0.
+
+    @property
+    def mean_2nd_score(self):
+        return np.mean(self.scores_2nd) if len(self.scores_2nd) > 0 else 0.
+
+    @property
+    def match_3rd_rate(self):
+        return float(self.total_3rd) / self.total_match if self.total_match != 0 else 0.
+    
+    @property
+    def mean_3rd_score(self):
+        return np.mean(self.scores_3rd) if len(self.scores_3rd) > 0 else 0.
+
+    @property
+    def match_4th_rate(self):
+        return float(self.total_4th) / self.total_match if self.total_match != 0 else 0.
+    
+    @property
+    def mean_4th_score(self):
+        return np.mean(self.scores_4th) if len(self.scores_4th) > 0 else 0.
+    
 
 @PLAYER.register_module(name="base")
 class BasePlayer():
     def __init__(
         self, 
-        name: str
+        name: str,
+        stat_path: Optional[str] = None
     ):
         self.name = name
-        self.stat = Statistics()
-
+        if stat_path is not None and os.path.exists(stat_path):
+            self.stat = Statistics.load_from_file(stat_path)
+            self.stat.stat_path = stat_path
+        else:
+            self.stat = Statistics()
+            self.stat.stat_path = stat_path
+            
     def play(
         self, 
         self_info: np.ndarray,
@@ -164,21 +297,29 @@ class BasePlayer():
     def update_stats(self, t: pm.Table, player_id: int):
         self.stat.update(t, player_id)
 
-    def update_match_stats(self, match):
-        # TODO
-        pass    
+    def update_match_stats(self, match, player_id):
+        self.stat.update_match(match, player_id)  
 
     def dump_stats(self):
         return self.stat.dump_stats()
+    
+    def save_stats(self, path=None):
+        path = path or self.stat.stat_path
+        return self.stat.save_to_file(path)
+    
+    def load_stats(self, path=None):
+        path = path or self.stat.stat_path
+        return self.stat.load_from_file(path)
     
 
 @PLAYER.register_module(name="random")
 class RandomPlayer(BasePlayer):
     def __init__(
         self, 
-        name: str
+        name: str,
+        stat_path: Optional[str] = None
     ):
-        super().__init__(name)
+        super().__init__(name, stat_path)
 
     def play(
         self, 

@@ -26,7 +26,6 @@ class Game():
         honba=0,
         kyoutaku=0,
     ):
-        print(oya, game_wind, scores, honba, kyoutaku)
         self.env.reset(
             oya=oya,
             game_wind=game_wind,

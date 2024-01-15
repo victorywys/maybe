@@ -77,7 +77,7 @@ class Match:
             "score": score,
         }
         for i, player in enumerate(self.players):
-            player.update_match_stats(self)
+            player.update_match_stats(self, i)
         
     def top_player_index(self, score: List[int]):
         return score.index(max(score))

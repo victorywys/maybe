@@ -1,3 +1,5 @@
+from typing import Optional
+
 from .Base import PLAYER, BasePlayer
 import numpy as np
 
@@ -11,9 +13,10 @@ from arena.common import tile_to_human, human_to_tile, action_to_human, human_to
 class HumanPlayer(BasePlayer):
     def __init__(
         self, 
-        name: str
+        name: str,
+        stat_path: Optional[str] = None
     ):
-        super.__init__(name)
+        super.__init__(name, stat_path=stat_path)
         self.deside_riichi = False
         self.printed_line = 0
 

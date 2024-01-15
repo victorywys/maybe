@@ -1,5 +1,7 @@
 from typing import Literal, List, Optional
 
+import os
+
 from .player import BasePlayer
 from .match import Match
 
@@ -24,10 +26,14 @@ class Arena():
             print(match.th_logger.dump_match())
             for url in match.th_logger.dump_urls():
                 print(url)
-            print(f"Match {i + 1} end with final score {match.match_result['score']}.")
+            print(f"Match {i + 1} end with final score:")
+            for i in range(4):
+                print(f"{self.players[i].name}: {match.match_result['score'][i]}")
             print()
     
-    def print_player_stats(self):
+    def print_player_stats(self, save=True):
         for player in self.players:
             print(player.name)
             print(player.dump_stats())
+            if save:
+                player.save_stats()

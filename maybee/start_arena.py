@@ -24,3 +24,4 @@ if __name__ == "__main__":
     ]
     arena = config.arena.build(players=players)
     arena.start()
+    arena.print_player_stats(save=True)

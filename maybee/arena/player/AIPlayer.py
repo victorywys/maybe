@@ -24,8 +24,9 @@ class SupervisedPlayer(BasePlayer):
             tenpai_pred_weight_path: Optional[str] = None,
             gpu: Optional[int] = 0,
             share_model: Optional[str] = None,
+            stat_path: Optional[str] = None,
         ):
-        super().__init__(name)
+        super().__init__(name, stat_path=stat_path)
         self.model = MahjongPlayer()
         self.model.load_state_dict(torch.load(weight_path)["best_network_params"])
         self.gpu = gpu

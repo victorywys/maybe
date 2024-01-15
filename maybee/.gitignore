@@ -3,6 +3,7 @@ runs/
 
 .amltconfig
 logs.txt
+player_stats
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

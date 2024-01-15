@@ -3,6 +3,7 @@ player1:
   name: sup_5_epoch
   weight_path: output/supervised_player/checkpoints/resume_5.pth
   # tenpai_pred_weight_path: output/test_tenpai/checkpoint/resume.pth
+  stat_path: player_stats/sup_5_epoch.pkl
   gpu: 0
 
 player2:
@@ -10,18 +11,21 @@ player2:
   name: sup_10_epoch
   weight_path: output/supervised_player/checkpoints/resume_10.pth
   # tenpai_pred_weight_path: output/test_tenpai/checkpoint/resume.pth
+  stat_path: player_stats/sup_10_epoch.pkl
   gpu: 0
 
 player3:
   type: supervised
   name: sup_15_epoch
   weight_path: output/supervised_player/checkpoints/resume_15.pth
+  stat_path: player_stats/sup_15_epoch.pkl
   gpu: 1
 
 player4:
   type: supervised
   name: sup_20_epoch
   weight_path: output/supervised_player/checkpoints/resume_20.pth
+  stat_path: player_stats/sup_20_epoch.pkl
   gpu: 1
 
 arena:
