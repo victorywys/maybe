@@ -1,0 +1,28 @@
+player1:
+  type: supervised
+  name: player1
+  weight_path: output/test_fixed/checkpoint/resume.pth
+  # tenpai_pred_weight_path: output/test_tenpai/checkpoint/resume.pth
+  gpu: 0
+
+player2:
+  type: supervised
+  name: player2
+  weight_path: output/test_fixed/checkpoint/resume.pth
+  # tenpai_pred_weight_path: output/test_tenpai/checkpoint/resume.pth
+  gpu: 0
+
+player3:
+  type: supervised
+  name: palyer3
+  weight_path: output/test_fixed/checkpoint/resume.pth
+  gpu: 0
+
+player4:
+  type: supervised
+  name: player4
+  weight_path: output/test_fixed/checkpoint/resume.pth
+  gpu: 0
+
+arena:
+  match_number: 1000

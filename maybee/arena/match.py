@@ -47,7 +47,7 @@ class Match:
         self.game = Game(self.players, self.th_logger)
         
         
-    def play_match(self):
+    def play_match(self, record_buffer = None):
         game_name = GameName()
         score = [25000, 25000, 25000, 25000]
         renchan = False
@@ -61,7 +61,7 @@ class Match:
                 honba=honba,
                 kyoutaku=kyoutaku,
             )
-            result = self.game.play()
+            result = self.game.play(record_buffer)
             for i, player in enumerate(self.players):
                 player.update_stats(self.game.env.t, i)
             honba = result.n_honba
