@@ -17,6 +17,7 @@ class Game():
         self.players = players
         self.env = pm.MahjongEnv()
         self.th_logger = th_logger
+        self.scores = [25000, 25000, 25000, 25000]
 
     def start_new(
         self,
@@ -27,6 +28,7 @@ class Game():
         kyoutaku=0,
     ):
         print(oya, game_wind, scores, honba, kyoutaku)
+        self.scores = scores
         self.env.reset(
             oya=oya,
             game_wind=game_wind,
@@ -53,7 +55,7 @@ class Game():
             dones = np.zeros([50], dtype=np.float32)
         
         step = 0
-            
+
         while not self.env.is_over():
             curr_player_id = self.env.get_curr_player_id()
             valid_actions_mask = self.env.get_valid_actions(nhot=True)
@@ -92,13 +94,16 @@ class Game():
                 rcd_array = np.zeros([0, 55], dtype=bool)
 
             dones[step - 1] = 1
-            rs[step - 1] = self.env.get_payoffs()[0]
+
+            rs[step - 1] = (self.env.t.get_result().score[0]  - self.scores[0])/ 1000  # normalized by 1
+            # only only consider straight points (no ranking points)
+            
             sin_array[step] = np.array(self.te.self_infos[0]).reshape([18, 34]).swapaxes(0, 1)
             gin_array[step] = np.array(self.te.global_infos[0])
 
             # --------- append to record buffer -------------
         
-        
+            self.scores = self.env.t.get_result().score
             record_buffer.append_episode(sin_array, rcd_array, gin_array, actions, action_masks, rs, dones, step)
 
         return self.env.t.get_result()
