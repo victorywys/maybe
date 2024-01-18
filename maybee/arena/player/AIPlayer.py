@@ -48,6 +48,7 @@ class SupervisedPlayer(BasePlayer):
             record_info: np.ndarray,
             global_info: np.ndarray,
             valid_actions_mask: np.ndarray,
+            return_policy: bool = False
         ):
         self_info = torch.Tensor(self_info).unsqueeze(0)
         record_info = torch.Tensor(record_info)
@@ -68,8 +69,11 @@ class SupervisedPlayer(BasePlayer):
         if self.log_details:
             print(a, pred[48], pred[52])
             self.log_tenpai_pred(self_info, record_info, global_info)
-            
-        return a
+        
+        if return_policy:
+            return a, pred
+        else:
+            return a
 
     def log_tenpai_pred(self, self_info, record_info, global_info):
         tenpai_pred = self.tenpai_pred_model(self_info, record_info, global_info)
