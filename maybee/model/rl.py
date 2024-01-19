@@ -24,20 +24,21 @@ from copy import deepcopy
 class RLMahjong(nn.Module):
     def __init__(
         self,
-        batch_size: int = 256,
-        save_interval: Optional[int] = None,
-        policy_network: Optional[nn.Module] = None,
+        # batch_size: int = 256,
+        actor_network: Optional[nn.Module] = None,
         value_network: Optional[nn.Module] = None,
         output_dir: Optional[str] = None,
         checkpoint_dir: Optional[str] = None,
-        ranking_rewards: Optional[list] = [45, 5, -15, -35],
+        # ranking_rewards: Optional[list] = [45, 5, -15, -35],
     ):
-        self.batch_size = batch_size
+        # self.batch_size = batch_size
+        super(RLMahjong, self).__init__()
+
         self.value_network = value_network
-        self.target_value_network = deepcopy(value_network)
-        self.policy_network = policy_network
+        self.actor_network = actor_network
         
         self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4) # TODO
+        self.target_value_network = deepcopy(value_network)
 
         self.update_times = 0
     
@@ -52,27 +53,36 @@ class RLMahjong(nn.Module):
 
         # sample a batch of data from replay buffer
         batch = buffer.sample_batch()
-        max_len = int(torch.max(batch[-1]))
-
-        for i, item in enumerate(batch[:-1]):
-            if i < 4:
-                item = item[:, :max_len + 1].clone()
-            else:
-                item = item[:, :max_len].clone()
         
         self_infos, others_infos, records, global_infos, actions, action_masks, rewards, dones, lengths = batch
 
+        max_len = int(torch.max(lengths).item())
+
+        self_infos = self_infos[:, :max_len + 1]
+        others_infos = others_infos[:, :max_len + 1]
+        # records = records[:, :max_len + 1] Records is already PackedSequence
+        global_infos = global_infos[:, :max_len + 1]
+        actions = actions[:, :max_len]
+        action_masks = action_masks[:, :max_len]
+        rewards = rewards[:, :max_len]
+        dones = dones[:, :max_len]
+
+
+        # for tmp in [self_infos, others_infos, global_infos]:
+        #     tmp = tmp[:, :max_len + 1].clone()
+        
+        # for tmp in [actions, action_masks, rewards, dones]:
+        #     tmp = tmp[:, :max_len].clone()
 
         # -------- update value network ------------
 
         # include oracle information to better estimate value function (asymmetric actor critic)
-        hand_infos = torch.cat([self_infos, others_infos], dim=-1)
+        # hand_infos = torch.cat([self_infos, others_infos], dim=-1)
         
+        v = self.value_network(self_infos, others_infos, records, global_infos)
 
-        v = self.value_network(hand_infos, records, global_infos)
-
-        v_tar = self.target_value_network(hand_infos, records, global_infos)
-
+        with torch.no_grad():
+            v_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
 
         # TODO: modify algorithm
         v_grape = rewards + (1 - dones) * v_tar[:, 1:]
@@ -81,22 +91,20 @@ class RLMahjong(nn.Module):
 
         loss_c = advantage.pow(2).mean()
 
-        # -------- update policy network ------------
+        # -------- update actor network ------------
 
-        logits = self.policy_network(self_infos[:, :-1], records[:, :-1], global_infos[:, :-1])
+        logits = self.actor_network(self_infos[:, :-1], records[:, :-1], global_infos[:, :-1])
 
-        # policy gradient algorithm to update policy network
+        # policy gradient algorithm to update actor network
         loss_a = - advantage * torch.log_softmax(logits, dim=-1) * action_masks
 
         loss_a = loss_a.sum(dim=-1).mean()
         
-
         # --------- update model parameters ------------
         loss = loss_a + loss_c
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        
 
         # -------- update target value network ------------
         if self.update_times % 1000 == 0:
@@ -104,14 +112,16 @@ class RLMahjong(nn.Module):
 
         self.update_times += 1
 
+        self.eval()
+
         return loss
 
 
-    def select_action(self, self_info, record, global_info, action_mask, temp=1, replay_buffer=None) -> int:
+    def select_action(self, self_info, record, global_info, action_mask, temp=1) -> int:
         
         self.eval()
 
-        logits = self.policy_network(self_info, record, global_info)
+        logits = self.actor_network(self_info, record, global_info)
         policy_prob = (torch.softmax(temp * logits[0], dim=-1) * action_mask.reshape[-1]).cpu().detach().numpy()
 
         a = np.random.choice(54, p=policy_prob)

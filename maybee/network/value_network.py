@@ -33,7 +33,7 @@ class AllInfoEncoder(nn.Module):
 @NETWORK.register_module()
 class StateValueNetwork(nn.Module):
     def __init__(self, hidden_size: int = 512):
-        super().__init__()
+        super(StateValueNetwork, self).__init__()
 
         action_dim = 54
         self.info_encoder = AllInfoEncoder()

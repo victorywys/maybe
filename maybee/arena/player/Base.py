@@ -16,6 +16,7 @@ class PLAYER(metaclass=Registry, name="player"):
 @dataclass
 class Statistics():
     total_games: int = 0
+    total_score: int = 0
     total_agali: int = 0
     total_tsumo: int = 0
     total_furi: int = 0
@@ -41,6 +42,10 @@ class Statistics():
 
     def update(self, t: pm.Table, player_id: int):
         self.total_games += 1
+
+        self.total_score += t.players[player_id].score - 25000
+        # self.total_score += t.get_result().results[player_id].score1
+
         if t.players[player_id].is_riichi():
             self.total_riichi += 1
         if t.players[player_id].is_menzen():
@@ -91,6 +96,7 @@ class Statistics():
     def dump_stats(self):
         lines = [
             f"总局数：{self.total_games}",
+            f"场均收支：{self.total_score / self.total_games:.2f}",
             f"和牌率：{self.agali_rate * 100:.2f}%",
             f"自摸率：{self.tsumo_rate * 100:.2f}%",
             f"放铳率：{self.furi_rate * 100:.2f}%",
@@ -161,6 +167,9 @@ class BasePlayer():
     ):
         raise NotImplementedError
 
+    def reset_stats(self):
+        self.stat = Statistics()
+    
     def update_stats(self, t: pm.Table, player_id: int):
         self.stat.update(t, player_id)
 
