@@ -9,7 +9,7 @@ from .encoder import RecordEncoder, GlobalInfoEncoder
 class AllInfoEncoder(nn.Module):
     def __init__(self):
         super(AllInfoEncoder, self).__init__()
-        n_channels = 18 * 4 # include self_info of other players
+        n_channels = 72 # include self_info of other players
 
         self.encoder = nn.Sequential(
             nn.Conv1d(n_channels, 64, 3, 1, 1),
@@ -26,7 +26,7 @@ class AllInfoEncoder(nn.Module):
         self.out_dim = 32 * 34
         
     def forward(self, x: torch.Tensor):
-        # x: shape [batch_size, 34, 18]
+        # x: shape [batch_size, 34, 72]
         return self.encoder(x.permute(0, 2, 1))
     
 
@@ -47,10 +47,9 @@ class StateValueNetwork(nn.Module):
             nn.Linear(hidden_size, 1)
         )
 
-
     def forward(self, self_info, others_info, records, global_info) -> torch.Tensor:
         
-        x1  = self.info_encoder(torch.cat([self_info, others_info], dim=-1))
+        x1 = self.info_encoder(torch.cat([self_info, others_info], dim=-1))
         x2 = self.record_encoder(records)
         x3 = self.global_info_encoder(global_info)
         y = torch.cat([x1, x2, x3], dim=1)

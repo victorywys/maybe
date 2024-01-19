@@ -20,6 +20,50 @@ from dataset import supervised_collate_fn, MultiFileSampler
 import os
 from copy import deepcopy
 
+
+class GRAPE:
+    """
+    policy evaluation algorithm: 
+    """
+
+    def __init__(self, alpha, gamma, lambd):
+        self.alpha = alpha
+        self.gamma = gamma
+        self.lambd = lambd
+
+    def compute_targets(self, q, pi, a_t, r_t, mu_t, done_t):
+        """
+        Compute G Q (s, a) + a A (s, a), and return a tuple of (G Q  (s, a) + a A  (s, a), A (s, \cdot))
+        q_t   = s[:-1]
+        q_tp1 = s[1:]
+        """
+        l = q.shape[0] - 1
+        pi_t, pi_tp1 = pi[:-1], pi[1:]
+        q_t, q_tp1 = q[:-1], q[1:]
+        q_t_a = q_t[np.arange(l), a_t]
+        v_t, v_tp1 = torch.sum(pi_t * q_t, dim=1), torch.sum(pi_tp1 * q_tp1, dim=1)
+        q_t_a_est = r_t + (1. - done_t) * self.gamma * v_tp1
+        td_error = q_t_a_est - q_t_a
+        rho_t_a = pi_t[np.arange(l), a_t] / mu_t  # importance sampling ratios
+        c_t_a = self.lambd * torch.minimum(rho_t_a, 1)
+
+        y_prime = 0  # y'_t
+        g_q = torch.zeros([l]).to(q.device) 
+        for u in reversed(range(l)):  # l-1, l-2, l-3, ..., 0
+            # If s_tp1[u] is from an episode different from s_t[u], y_prime needs to be reset.
+            y_prime = 0 if done_t[u] else y_prime  # y'_u
+            g_q[u] = q_t_a_est[u] + y_prime
+
+            # y'_{u-1} used in the next step
+            y_prime = self.lambd * self.gamma * rho_t_a[u] * td_error[u] + self.gamma * c_t_a[
+                u] * y_prime
+
+        targets_q = g_q + self.alpha * (q_t_a - v_t)
+        advantages = (1. - self.alpha) * (q_t - v_t.reshape([-1, 1]))
+
+        return targets_q[0], advantages[0]
+
+
 @MODEL.register_module()
 class RLMahjong(nn.Module):
     def __init__(
@@ -30,6 +74,7 @@ class RLMahjong(nn.Module):
         output_dir: Optional[str] = None,
         checkpoint_dir: Optional[str] = None,
         # ranking_rewards: Optional[list] = [45, 5, -15, -35],
+        device: Optional[str] = "cuda",
     ):
         # self.batch_size = batch_size
         super(RLMahjong, self).__init__()
@@ -41,6 +86,9 @@ class RLMahjong(nn.Module):
         self.target_value_network = deepcopy(value_network)
 
         self.update_times = 0
+
+        self.device = torch.device(device)
+        self.to(device=self.device)
     
     def _init_logger(self, log_dir):
         self.log_dir = log_dir
@@ -56,17 +104,20 @@ class RLMahjong(nn.Module):
         
         self_infos, others_infos, records, global_infos, actions, action_masks, rewards, dones, lengths = batch
 
-        max_len = int(torch.max(lengths).item())
+        self.infos = self_infos.float()
+        others_infos = others_infos.float()
+        # records = records.float()
 
-        self_infos = self_infos[:, :max_len + 1]
-        others_infos = others_infos[:, :max_len + 1]
-        # records = records[:, :max_len + 1] Records is already PackedSequence
-        global_infos = global_infos[:, :max_len + 1]
-        actions = actions[:, :max_len]
-        action_masks = action_masks[:, :max_len]
-        rewards = rewards[:, :max_len]
-        dones = dones[:, :max_len]
+        # max_len = int(torch.max(lengths).item())
 
+        # self_infos = self_infos[:, :max_len + 1]
+        # others_infos = others_infos[:, :max_len + 1]
+        # # records = records[:, :max_len + 1] Records is already PackedSequence
+        # global_infos = global_infos[:, :max_len + 1]
+        # actions = actions[:, :max_len]
+        # action_masks = action_masks[:, :max_len]
+        # rewards = rewards[:, :max_len]
+        # dones = dones[:, :max_len]
 
         # for tmp in [self_infos, others_infos, global_infos]:
         #     tmp = tmp[:, :max_len + 1].clone()
@@ -85,17 +136,31 @@ class RLMahjong(nn.Module):
             v_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
 
         # TODO: modify algorithm
-        v_grape = rewards + (1 - dones) * v_tar[:, 1:]
         
-        advantage = v_grape - v[:, :-1]
+        v_grape = rewards[:, None] + (1 - dones[:, None]) * v_tar
+        
+        advantage = v_grape - v
 
         loss_c = advantage.pow(2).mean()
 
         # -------- update actor network ------------
 
-        logits = self.actor_network(self_infos[:, :-1], records[:, :-1], global_infos[:, :-1])
+        logits = self.actor_network(self_infos, records, global_infos)
 
+        # from GRAPE ---
+        logpi = logits - torch.logsumexp(logits).sum(dim=-1, keepdim=True)
+        r = self.pi_ / self.mu_ph
+        adv = torch.sum(self.advantage_ph * one_hot_action, dim=1)
+        obj_pi = r * adv
+        loss_p = tf.reduce_mean(- obj_pi, name='policy_loss')
+        _loss_h = tf.reduce_sum(self.pi * logpi, axis=1)
+        loss_h = tf.reduce_mean(_loss_h, name='negative_entropy')
+        
+        # -------------
+
+        # print(advantage.shape, logits.shape, action_masks.shape)
         # policy gradient algorithm to update actor network
+
         loss_a = - advantage * torch.log_softmax(logits, dim=-1) * action_masks
 
         loss_a = loss_a.sum(dim=-1).mean()

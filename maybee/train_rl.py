@@ -46,7 +46,8 @@ class RLConfig(PythonConfig):
     value_network: RegistryConfig[NETWORK]
     agent: RegistryConfig[MODEL]
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
-    save_interval: int = 10000
+    save_interval: int = 1000
+    buffer_size: int = 2000
 
     
 if __name__ == "__main__":
@@ -69,13 +70,12 @@ if __name__ == "__main__":
     
     value_network=config.value_network.build()
 
-    
     agent = config.agent.build(actor_network=players[0].model,
-                               value_network=value_network
+                               value_network=value_network,
+                               device='cuda'
                               )
 
-
-    record_buffer = MajEncV2ReplayBuffer(max_num_seq=1000)
+    record_buffer = MajEncV2ReplayBuffer(max_num_seq=config.buffer_size, device='cuda')
 
     env = MahjongEnv()
     num_games = int(1e6)
@@ -88,7 +88,7 @@ if __name__ == "__main__":
 
     while game < num_games:
 
-        try:
+        if 1:
 
             env.reset(oya=game % 4, game_wind=winds[game % 3])
             # env.reset(oya=2, game_wind='south', debug_mode=1)
@@ -195,23 +195,24 @@ if __name__ == "__main__":
             success_games += 1
             game += 1
 
-            if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
-                agent.update(record_buffer)
+            # if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
+            # if game > 10:
+                # agent.update(record_buffer)
 
 
-        except Exception as inst:
+        # except Exception as inst:
             
-            game += 1
-            time.sleep(0.1)
-            logging.info(
-                "-------------- execption in game {} -------------------------".format(game))
-            logging.info('Exception: ', inst)
-            logging.info("----------------- Traceback ---------------------------------")
-            traceback.print_exc()
-            env.render()
-            # logging.info("-------------- replayable log -------------------------------")
-            # env.t.print_debug_replay()
-            continue
+        #     game += 1
+        #     time.sleep(0.1)
+        #     logging.info(
+        #         "-------------- execption in game {} -------------------------".format(game))
+        #     logging.info('Exception: ', inst)
+        #     logging.info("----------------- Traceback ---------------------------------")
+        #     traceback.print_exc()
+        #     env.render()
+        #     # logging.info("-------------- replayable log -------------------------------")
+        #     # env.t.print_debug_replay()
+        #     continue
         
         if game % config.save_interval == 0:
 

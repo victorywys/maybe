@@ -6,7 +6,7 @@ from torch.nn.utils.rnn import *
 
 class MajEncV2ReplayBuffer:
     def __init__(self, sin_shape=[34, 18], oin_shape=[34, 54], rcd_dim=55, gin_dim=15, action_dim=54, max_num_seq=int(1e5), 
-                 batch_size=32, device='cpu'):
+                 batch_size=32, device='cuda'):
         super(MajEncV2ReplayBuffer, self).__init__()
 
         self.max_steps = 50
@@ -48,9 +48,9 @@ class MajEncV2ReplayBuffer:
 
         self.actions_b = torch.zeros((batch_size, self.max_steps), dtype=torch.int, device=self.device)
         self.policy_prob_b = torch.zeros((batch_size, self.max_steps, action_dim), dtype=torch.float32, device=self.device)
-        self.action_masks_b = torch.zeros((batch_size, self.max_steps, action_dim), dtype=torch.bool, device=self.device)
-        self.self_infos_b = torch.zeros((batch_size, self.max_steps + 1, *sin_shape), dtype=torch.bool, device=self.device)
-        self.others_infos_b = torch.zeros((batch_size, self.max_steps + 1, *oin_shape), dtype=torch.bool, device=self.device)
+        self.action_masks_b = torch.zeros((batch_size, self.max_steps, action_dim), dtype=torch.float32, device=self.device)
+        self.self_infos_b = torch.zeros((batch_size, self.max_steps + 1, *sin_shape), dtype=torch.float32, device=self.device)
+        self.others_infos_b = torch.zeros((batch_size, self.max_steps + 1, *oin_shape), dtype=torch.float32, device=self.device)
         # self.records_b = torch.zeros((batch_size, self.max_steps, self.max_rcd_len, rcd_dim), dtype=torch.float32, device=self.device)
         self.global_infos_b = torch.zeros((batch_size, self.max_steps, gin_dim), dtype=torch.float32, device=self.device)
         self.rewards_b = torch.zeros((batch_size, self.max_steps), dtype=torch.float32, device=self.device)
@@ -102,7 +102,7 @@ class MajEncV2ReplayBuffer:
         self.tail = (self.tail + 1) % self.max_num_seq
         self.size = min(self.size + 1, self.max_num_seq)
 
-    def sample_batch(self):
+    def sample_seq_batch(self):
         sampled_episodes = torch.from_numpy(np.random.choice(self.size, [self.batch_size])).to(torch.int64)
 
         self.actions_b.fill_(0)
@@ -121,12 +121,39 @@ class MajEncV2ReplayBuffer:
         self.rewards_b[:] = self.rewards[sampled_episodes]
         self.dones_b[:] = self.dones[sampled_episodes]
 
-        self.self_infos_b = self.self_infos[sampled_episodes]
-        self.others_infos_b = self.others_infos[sampled_episodes]
-        self.global_infos_b = self.global_infos[sampled_episodes]
+        self.self_infos_b[:] = self.self_infos[sampled_episodes]
+        self.others_infos_b[:] = self.others_infos[sampled_episodes]
+        self.global_infos_b[:] = self.global_infos[sampled_episodes]
 
         self.records_b = pack_sequence([self.records[sampled_episodes[b]][:self.length_b[b]] for b in range(self.batch_size)], enforce_sorted=False)
         # records_b is a PackedSequence
 
         return self.self_infos_b, self.others_infos_b, self.records_b, self.global_infos_b, self.actions_b, self.action_masks_b, self.rewards_b, self.dones_b, self.length_b
+    
+    def sample_batch(self, batch_size=256):
+
+        sampled_episodes = torch.from_numpy(np.random.choice(self.size, [batch_size])).to(torch.int64)
+
+        length_b = self.length[sampled_episodes]
+        
+        sampled_steps = torch.zeros([batch_size], dtype=torch.int64)
+        for b in range(batch_size):
+            sampled_steps[b] = np.random.choice(length_b[b].cpu().item())
+
+        actions_b = self.actions[sampled_episodes, sampled_steps]
+
+        policy_prob_b = self.policy_prob[sampled_episodes, sampled_steps]
+        action_masks_b = self.action_masks[sampled_episodes, sampled_steps]
+        rewards_b = self.rewards[sampled_episodes, sampled_steps]
+        dones_b = self.dones[sampled_episodes, sampled_steps]
+
+        self_infos_b = self.self_infos[sampled_episodes, sampled_steps].float()
+
+        others_infos_b = self.others_infos[sampled_episodes, sampled_steps].float()
+        global_infos_b = self.global_infos[sampled_episodes, sampled_steps].float()
+
+        records = [self.records[sampled_episodes[b]][:sampled_steps[b] + 1].float() for b in range(batch_size)]
+        records_b = pack_sequence(records, enforce_sorted=False)
+        
+        return self_infos_b, others_infos_b, records_b, global_infos_b, actions_b, action_masks_b, rewards_b, dones_b, length_b
     
