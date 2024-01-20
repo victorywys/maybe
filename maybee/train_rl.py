@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
     while game < num_games:
 
-        if 1:
+        try:
 
             env.reset(oya=game % 4, game_wind=winds[game % 3])
             # env.reset(oya=2, game_wind='south', debug_mode=1)
@@ -129,22 +129,23 @@ if __name__ == "__main__":
                 
                 if rcd.ndim == 1:
                     rcd = np.zeros([0, 55], dtype=bool)
-                rcd = np.concatenate([np.zeros([1, 55], dtype=bool), rcd], axis=0)  # pad with start token = 0
                 
                 gin = np.array(te.global_infos[curr_player_id])
 
                 # --------- make decision -------------
                 # TODO: epsilon greedy
-                a, policy_prob = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask, return_policy=True)
+                
 
-                if curr_player_id == 0 and record_buffer is not None:   # only record player 0 (the RL agent)
+                if curr_player_id == 0:   # only record player 0 (the RL agent)
+                    a, policy_prob = agent.select_action(obs, rcd, gin, valid_actions_mask, temp=1)
+
                     sin_array[step] = obs
                     oin = np.zeros([34, 54], dtype=bool)
                     for i in range(1, 4): # oracle information (others' hands)
                         oin[:, (i - 1) * 18 : i * 18] = np.array(te.self_infos[(curr_player_id + i) % 4]).reshape([18, 34]).swapaxes(0, 1)
                     oin_array[step] = oin
                     gin_array[step] = gin
-                    rcd_array[step][:rcd.shape[0]] = rcd
+                    rcd_array[step][1 : rcd.shape[0] + 1] = rcd  # with start token
                     actions[step] = a
                     # rs[step] = 0
                     # dones[step] = 0
@@ -153,14 +154,20 @@ if __name__ == "__main__":
 
                     step += 1
 
-                    # test Q value
+                    # test Q value, for debugging
                     if step == 10 and is_prime(game):
+                        
+                        rcd_padded = np.concatenate([np.zeros([1, 55], dtype=bool), rcd], axis=0)
+
                         q = agent.value_network(torch.from_numpy(obs[None, :]).cuda().float(),
                                                 torch.from_numpy(oin[None, :]).cuda().float(),
-                                                torch.from_numpy(rcd[None, :]).cuda().float(),
+                                                torch.from_numpy(rcd_padded[None, :]).cuda().float(),
                                                 torch.from_numpy(gin[None, :]).cuda().float())
 
                         print("Q value of current action of player 0 = ", q[0, a].cpu().item())
+
+                else:
+                    a = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask)  # AI player does padding interiorly 
                                         
                 env.step(curr_player_id, a)
 
@@ -184,9 +191,11 @@ if __name__ == "__main__":
                 
                 oin = np.zeros([34, 54], dtype=bool)
                 for i in range(1, 4): # oracle information (others' hands)
-                    oin[:, (i - 1) * 18 : i * 18] = np.array(te.self_infos[(curr_player_id + i) % 4]).reshape([18, 34]).swapaxes(0, 1)
+                    oin[:, (i - 1) * 18 : i * 18] = np.array(te.self_infos[(0 + i) % 4]).reshape([18, 34]).swapaxes(0, 1)
                 oin_array[step] = oin
-                
+
+                rcd_array[step][1 : np.array(te.records[0]).shape[0] + 1] = np.array(te.records[0])  # with start token
+
                 gin_array[step] = np.array(te.global_infos[0])
 
                 # --------- append to record buffer -------------
@@ -216,19 +225,19 @@ if __name__ == "__main__":
                     agent.update(record_buffer)
 
 
-        # except Exception as inst:
+        except Exception as inst:
             
-        #     game += 1
-        #     time.sleep(0.1)
-        #     logging.info(
-        #         "-------------- execption in game {} -------------------------".format(game))
-        #     logging.info('Exception: ', inst)
-        #     logging.info("----------------- Traceback ---------------------------------")
-        #     traceback.print_exc()
-        #     env.render()
-        #     # logging.info("-------------- replayable log -------------------------------")
-        #     # env.t.print_debug_replay()
-        #     continue
+            game += 1
+            time.sleep(0.1)
+            logging.info(
+                "-------------- execption in game {} -------------------------".format(game))
+            logging.info('Exception: ', inst)
+            logging.info("----------------- Traceback ---------------------------------")
+            traceback.print_exc()
+            env.render()
+            # logging.info("-------------- replayable log -------------------------------")
+            # env.t.print_debug_replay()
+            continue
         
         if game % config.save_interval == 0:
 

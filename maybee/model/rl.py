@@ -186,16 +186,32 @@ class RLMahjong(nn.Module):
         return loss
 
 
-    def select_action(self, self_info, record, global_info, action_mask, temp=1) -> int:
+    def select_action(self, self_info, record, global_info, action_mask, temp=1):
         
         self.eval()
 
+        if isinstance(self_info, np.ndarray):
+            self_info = torch.from_numpy(self_info).float().to(self.device)[None, :]
+        if isinstance(record, np.ndarray):
+            record = torch.from_numpy(record).float().to(self.device)[None, :]
+        if isinstance(global_info, np.ndarray):
+            global_info = torch.from_numpy(global_info).float().to(self.device)[None, :]
+        if isinstance(action_mask, np.ndarray):
+            action_mask = torch.from_numpy(action_mask).float().to(self.device)
+        
+        RECORD_PAD = torch.zeros(1, 1, 55).to(self.device).float()
+        
+        if record.ndim > 1:
+            record = torch.cat([RECORD_PAD, record], dim=1)
+        else:
+            record = RECORD_PAD
+
         logits = self.actor_network(self_info, record, global_info)
-        policy_prob = (torch.softmax(temp * logits[0], dim=-1) * action_mask.reshape[-1]).cpu().detach().numpy()
+        policy_prob = (torch.softmax(logits[0] / temp, dim=-1) * action_mask.reshape([-1])).cpu().detach().numpy()
 
-        a = np.random.choice(54, p=policy_prob)
+        a = np.random.choice(54, p=policy_prob/policy_prob.sum())
 
-        return a
+        return a, policy_prob
 
         
     def _checkpoint(self, checkpoint_dir=None):
