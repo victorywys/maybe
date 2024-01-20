@@ -84,7 +84,7 @@ class RLMahjong(nn.Module):
         self.actor_network = actor_network
         self.gamma = gamma
 
-        self.grape = GRAPE(alpha=0.5, gamma=gamma, lambd=0.9) # TODO: search
+        self.grape = GRAPE(alpha=0.5, gamma=gamma, lambd=0.8) # TODO: search
         
         self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4) # TODO
         self.target_value_network = deepcopy(value_network)
@@ -109,6 +109,7 @@ class RLMahjong(nn.Module):
         
         self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, rewards, dones, lengths = batch
 
+        action_masks = torch.cat([action_masks, torch.ones_like(action_masks[:1])], dim=0)
         # self.infos = self_infos.float()
         # others_infos = others_infos.float()
         # records = records.float()
@@ -136,9 +137,10 @@ class RLMahjong(nn.Module):
         
         q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
         with torch.no_grad():
-            q_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
-            pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach(), dim=-1)
-            q_grape, adv = self.grape.compute_targets(q_tar, pi, actions, rewards, policy_probs, dones)
+            # q_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
+            pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach(), dim=-1) * action_masks
+            pi = pi / pi.sum(dim=-1, keepdim=True)
+            q_grape, adv = self.grape.compute_targets(q.detach(), pi, actions, rewards, policy_probs, dones)
 
         # print(q_grape.shape, adv.shape)  [batch_size],  [batch_size, action_dim]
         
