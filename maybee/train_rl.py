@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
         try:
 
-            env.reset(oya=game % 4, game_wind=winds[game % 3])
+            env.reset(oya=game % 4, game_wind=winds[game % 3], kyoutaku=0, honba=0)
             # env.reset(oya=2, game_wind='south', debug_mode=1)
 
             th_logger = TenhouJsonLogger()
@@ -137,7 +137,7 @@ if __name__ == "__main__":
                 
 
                 if curr_player_id == 0:   # only record player 0 (the RL agent)
-                    a, policy_prob = agent.select_action(obs, rcd, gin, valid_actions_mask, temp=1)
+                    a, policy_prob = agent.select_action(obs, rcd, gin, valid_actions_mask, temp=3)
 
                     sin_array[step] = obs
                     oin = np.zeros([34, 54], dtype=bool)
@@ -170,17 +170,15 @@ if __name__ == "__main__":
                     a = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask)  # AI player does padding interiorly 
                                         
                 env.step(curr_player_id, a)
-
+            
                 # ------- update state encoding ------------
-                if not env.is_over():
-                    te.update()
+                te.update()
             
             # ----------------------- get result ---------------------------------
-            th_logger.end_game(env.t, te)
 
             if step >= 1:
                 #  ------- record final step info ----------
-                te.update()
+                # te.update()
 
                 dones[step - 1] = 1
 
@@ -200,11 +198,12 @@ if __name__ == "__main__":
 
                 # --------- append to record buffer -------------
             
-                scores = env.t.get_result().score
+                # scores = env.t.get_result().score
                 record_buffer.append_episode(sin_array, oin_array, rcd_array, gin_array, actions, policy_probs, action_masks, rs, dones, step)
 
             # ----------------------- get result ---------------------------------
             payoffs = np.array(env.get_payoffs())
+            
             if is_prime(game):
                 print("Game {}, payoffs: {}".format(game, payoffs))
 
@@ -220,7 +219,7 @@ if __name__ == "__main__":
 
             # if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
             
-            if game > 1000:
+            if game > 10:
                 for _ in range(5):
                     agent.update(record_buffer)
 
