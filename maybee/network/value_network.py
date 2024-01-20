@@ -31,9 +31,9 @@ class AllInfoEncoder(nn.Module):
     
 
 @NETWORK.register_module()
-class StateValueNetwork(nn.Module):
+class QNetwork(nn.Module):
     def __init__(self, hidden_size: int = 512):
-        super(StateValueNetwork, self).__init__()
+        super(QNetwork, self).__init__()
 
         action_dim = 54
         self.info_encoder = AllInfoEncoder()
@@ -44,7 +44,7 @@ class StateValueNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, 1)
+            nn.Linear(hidden_size, action_dim)
         )
 
     def forward(self, self_info, others_info, records, global_info) -> torch.Tensor:

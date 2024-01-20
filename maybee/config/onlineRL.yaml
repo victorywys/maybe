@@ -2,7 +2,7 @@
 #   type: MahjongPlayer
 
 value_network:
-  type: StateValueNetwork
+  type: QNetwork
 
 agent: 
   type: RLMahjong

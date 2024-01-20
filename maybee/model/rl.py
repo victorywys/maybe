@@ -44,8 +44,8 @@ class GRAPE:
         v_t, v_tp1 = torch.sum(pi_t * q_t, dim=1), torch.sum(pi_tp1 * q_tp1, dim=1)
         q_t_a_est = r_t + (1. - done_t) * self.gamma * v_tp1
         td_error = q_t_a_est - q_t_a
-        rho_t_a = pi_t[np.arange(l), a_t] / mu_t  # importance sampling ratios
-        c_t_a = self.lambd * torch.minimum(rho_t_a, 1)
+        rho_t_a = pi_t[np.arange(l), a_t] / mu_t[np.arange(l), a_t]  # importance sampling ratios
+        c_t_a = self.lambd * torch.clamp(rho_t_a, 0, 1)
 
         y_prime = 0  # y'_t
         g_q = torch.zeros([l]).to(q.device) 
@@ -61,7 +61,7 @@ class GRAPE:
         targets_q = g_q + self.alpha * (q_t_a - v_t)
         advantages = (1. - self.alpha) * (q_t - v_t.reshape([-1, 1]))
 
-        return targets_q[0], advantages[0]
+        return targets_q, advantages
 
 
 @MODEL.register_module()
@@ -75,18 +75,23 @@ class RLMahjong(nn.Module):
         checkpoint_dir: Optional[str] = None,
         # ranking_rewards: Optional[list] = [45, 5, -15, -35],
         device: Optional[str] = "cuda",
+        gamma: Optional[float] = 0.999,
     ):
         # self.batch_size = batch_size
         super(RLMahjong, self).__init__()
 
         self.value_network = value_network
         self.actor_network = actor_network
+        self.gamma = gamma
+
+        self.grape = GRAPE(alpha=0.5, gamma=gamma, lambd=0.9) # TODO: search
         
         self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4) # TODO
         self.target_value_network = deepcopy(value_network)
 
         self.update_times = 0
 
+        self.mse_loss = nn.MSELoss()
         self.device = torch.device(device)
         self.to(device=self.device)
     
@@ -100,14 +105,13 @@ class RLMahjong(nn.Module):
         self.train()
 
         # sample a batch of data from replay buffer
-        batch = buffer.sample_batch()
+        batch = buffer.sample_contiguous_batch(num_seq=20)
         
-        self_infos, others_infos, records, global_infos, actions, action_masks, rewards, dones, lengths = batch
+        self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, rewards, dones, lengths = batch
 
-        self.infos = self_infos.float()
-        others_infos = others_infos.float()
+        # self.infos = self_infos.float()
+        # others_infos = others_infos.float()
         # records = records.float()
-
         # max_len = int(torch.max(lengths).item())
 
         # self_infos = self_infos[:, :max_len + 1]
@@ -130,43 +134,43 @@ class RLMahjong(nn.Module):
         # include oracle information to better estimate value function (asymmetric actor critic)
         # hand_infos = torch.cat([self_infos, others_infos], dim=-1)
         
-        v = self.value_network(self_infos, others_infos, records, global_infos)
-
+        q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
         with torch.no_grad():
-            v_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
+            q_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
+            pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach(), dim=-1)
+            q_grape, adv = self.grape.compute_targets(q_tar, pi, actions, rewards, policy_probs, dones)
 
-        # TODO: modify algorithm
+        # print(q_grape.shape, adv.shape)  [batch_size],  [batch_size, action_dim]
         
-        v_grape = rewards[:, None] + (1 - dones[:, None]) * v_tar
-        
-        advantage = v_grape - v
-
-        loss_c = advantage.pow(2).mean()
+        loss_c = self.mse_loss(q[np.arange(rewards.shape[0]), actions], q_grape.detach())
 
         # -------- update actor network ------------
 
-        logits = self.actor_network(self_infos, records, global_infos)
+        # logits = self.actor_network(self_infos, records, global_infos)
 
-        # from GRAPE ---
-        logpi = logits - torch.logsumexp(logits).sum(dim=-1, keepdim=True)
-        r = self.pi_ / self.mu_ph
-        adv = torch.sum(self.advantage_ph * one_hot_action, dim=1)
-        obj_pi = r * adv
-        loss_p = tf.reduce_mean(- obj_pi, name='policy_loss')
-        _loss_h = tf.reduce_sum(self.pi * logpi, axis=1)
-        loss_h = tf.reduce_mean(_loss_h, name='negative_entropy')
+        # # from GRAPE ---
+        # logpi = logits - torch.logsumexp(logits).sum(dim=-1, keepdim=True)
+        # r = self.pi_ / self.mu_ph
+        # adv = torch.sum(self.advantage_ph * one_hot_actio+n, dim=1)
+        # obj_pi = r * adv
+        # loss_p = tf.reduce_mean(- obj_pi, name='policy_loss')
+        # _loss_h = tf.reduce_sum(self.pi * logpi, axis=1)
+        # loss_h = tf.reduce_mean(_loss_h, name='negative_entropy')
         
-        # -------------
+        # # -------------
 
-        # print(advantage.shape, logits.shape, action_masks.shape)
-        # policy gradient algorithm to update actor network
+        # # print(advantage.shape, logits.shape, action_masks.shape)
+        # # policy gradient algorithm to update actor network
 
-        loss_a = - advantage * torch.log_softmax(logits, dim=-1) * action_masks
-
-        loss_a = loss_a.sum(dim=-1).mean()
+        # loss_a = - advantage * torch.log_softmax(logits, dim=-1) * action_masks
+        # loss_a = loss_a.sum(dim=-1).mean()
         
         # --------- update model parameters ------------
-        loss = loss_a + loss_c
+        # if self.update_times > 5000:
+        #     loss = loss_a + loss_c
+        # else:
+        loss = loss_c
+        
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()

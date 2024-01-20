@@ -1,5 +1,6 @@
 import pymahjong as pm
 import numpy as np
+import torch
 import time
 import os
 import traceback
@@ -109,6 +110,7 @@ if __name__ == "__main__":
 
             sin_array = np.zeros([51, 34, 18], dtype=bool)
             oin_array = np.zeros([51, 34, 54], dtype=bool)
+            rcd_array = np.zeros([51, 200, 55], dtype=bool)
             gin_array = np.zeros([51, 15], dtype=bool)
             actions = np.zeros([50], dtype=int)
             action_masks = np.zeros([50, 54], dtype=bool)
@@ -124,13 +126,16 @@ if __name__ == "__main__":
                 valid_actions_mask = env.get_valid_actions(nhot=True)
                 obs = np.array(te.self_infos[curr_player_id]).reshape([18, 34]).swapaxes(0, 1)
                 rcd = np.array(te.records[curr_player_id])
+                
+                if rcd.ndim == 1:
+                    rcd = np.zeros([0, 55], dtype=bool)
+                rcd = np.concatenate([np.zeros([1, 55], dtype=bool), rcd], axis=0)  # pad with start token = 0
+                
                 gin = np.array(te.global_infos[curr_player_id])
 
                 # --------- make decision -------------
                 # TODO: epsilon greedy
                 a, policy_prob = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask, return_policy=True)
-
-                env.step(curr_player_id, a)
 
                 if curr_player_id == 0 and record_buffer is not None:   # only record player 0 (the RL agent)
                     sin_array[step] = obs
@@ -139,6 +144,7 @@ if __name__ == "__main__":
                         oin[:, (i - 1) * 18 : i * 18] = np.array(te.self_infos[(curr_player_id + i) % 4]).reshape([18, 34]).swapaxes(0, 1)
                     oin_array[step] = oin
                     gin_array[step] = gin
+                    rcd_array[step][:rcd.shape[0]] = rcd
                     actions[step] = a
                     # rs[step] = 0
                     # dones[step] = 0
@@ -147,9 +153,21 @@ if __name__ == "__main__":
 
                     step += 1
 
+                    # test Q value
+                    if step == 10 and is_prime(game):
+                        q = agent.value_network(torch.from_numpy(obs[None, :]).cuda().float(),
+                                                torch.from_numpy(oin[None, :]).cuda().float(),
+                                                torch.from_numpy(rcd[None, :]).cuda().float(),
+                                                torch.from_numpy(gin[None, :]).cuda().float())
+
+                        print("Q value of current action of player 0 = ", q[0, a].cpu().item())
+                                        
+                env.step(curr_player_id, a)
+
                 # ------- update state encoding ------------
                 if not env.is_over():
                     te.update()
+            
             # ----------------------- get result ---------------------------------
             th_logger.end_game(env.t, te)
 
@@ -157,13 +175,9 @@ if __name__ == "__main__":
                 #  ------- record final step info ----------
                 te.update()
 
-                rcd_array = np.array(te.records[0]) # only record player 0 (the RL agent)
-                if rcd_array.ndim == 1:
-                    rcd_array = np.zeros([0, 55], dtype=bool)
-
                 dones[step - 1] = 1
 
-                rs[step - 1] = (env.t.get_result().score[0]  - scores[0])/ 1000  # normalized by 1
+                rs[step - 1] = (env.t.get_result().score[0]  - scores[0])/ 1000  # normalized by 1000
                 # only only consider straight points (no ranking points)
                 
                 sin_array[step] = np.array(te.self_infos[0]).reshape([18, 34]).swapaxes(0, 1)
@@ -196,8 +210,10 @@ if __name__ == "__main__":
             game += 1
 
             # if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
-            # if game > 10:
-                # agent.update(record_buffer)
+            
+            if game > 1000:
+                for _ in range(5):
+                    agent.update(record_buffer)
 
 
         # except Exception as inst:
