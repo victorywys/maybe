@@ -126,14 +126,15 @@ class MajEncV2ReplayBuffer:
         
         rcd_lens = []
         
-        rcd_sum  = torch.sum(records_b, dim=-1)  # [batch_size, max_rcd_len]
+        rcd_sum  = torch.sum(torch.abs(records_b), dim=-1)  # [batch_size, max_rcd_len]
 
         for i in range(batch_size + 1):
-            rcd_lens.append(max(rcd_sum[i].nonzero().size(0), 1))
+            rcd_lens.append(rcd_sum[i].nonzero().size(0) + 1)  # + 1 due to the start token
 
         # print(rcd_lens)
 
         records_b = pack_padded_sequence(records_b, rcd_lens, batch_first=True, enforce_sorted=False)
+
         return self_infos_b, others_infos_b, records_b, global_infos_b, actions_b, action_masks_b, policy_prob_b, rewards_b, dones_b, length_b
 
     # def sample_seq_batch(self):
