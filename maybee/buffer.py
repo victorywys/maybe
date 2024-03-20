@@ -15,6 +15,7 @@ class MajEncV2ReplayBuffer:
         self.sin_shape = sin_shape
         self.rcd_dim = rcd_dim
         self.gin_dim = gin_dim
+        self.action_dim = action_dim
  
         self.batch_size = batch_size
         self.max_num_seq = max_num_seq 
@@ -130,11 +131,18 @@ class MajEncV2ReplayBuffer:
             np.random.shuffle(order)
             indices = np.concatenate([order[0]*9 + np.arange(9), order[1]*9 + np.arange(9), order[2]*9 + np.arange(9), np.arange(27, 34)])
             indices_rcd = np.concatenate([order[0]*9 + np.arange(9), order[1]*9 + np.arange(9), order[2]*9 + np.arange(9), np.arange(27, 34), order + 34, np.arange(37, 55)])
+            indices_act = np.concatenate([order[0]*9 + np.arange(9), order[1]*9 + np.arange(9), order[2]*9 + np.arange(9), np.arange(27, 34), order + 34, np.arange(37, 54)])
 
             self_infos_b = self_infos_b[:, indices, :]
             others_infos_b = others_infos_b[:, indices, :]
-
+            
             records_b = records_b[:, :, indices_rcd]
+
+            action_masks_b = action_masks_b[:, indices_act]
+            policy_prob_b = policy_prob_b[:, indices_act]
+            one_hot_action_b = torch.nn.functional.one_hot(actions_b.to(torch.int64), num_classes=self.action_dim)
+            one_hot_actions_b = one_hot_action_b[:, indices_act]
+            actions_b = torch.argmax(one_hot_actions_b, dim=-1)
 
         rcd_lens = []
         

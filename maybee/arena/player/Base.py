@@ -96,7 +96,7 @@ class Statistics():
     def dump_stats(self):
         lines = [
             f"总局数：{self.total_games}",
-            f"场均收支：{self.total_score / self.total_games:.2f}",
+            f"场均收支：{self.total_score / self.total_games}",
             f"和牌率：{self.agali_rate * 100:.2f}%",
             f"自摸率：{self.tsumo_rate * 100:.2f}%",
             f"放铳率：{self.furi_rate * 100:.2f}%",

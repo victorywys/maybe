@@ -163,7 +163,7 @@ class RLMahjong(nn.Module):
 
         one_hot_action = nn.functional.one_hot(actions.to(torch.int64), num_classes=pi.shape[-1]) # convert actions to one-hot
 
-        r =  torch.sum((pi / policy_probs.clamp(1e-2, torch.inf)) * one_hot_action, dim=-1)
+        r =  torch.sum((pi / policy_probs.clamp(1e-3, torch.inf)) * one_hot_action, dim=-1)
         adv_a = torch.sum(adv.detach() * one_hot_action, dim=-1)
         obj_pi = r * adv_a
 
@@ -171,7 +171,7 @@ class RLMahjong(nn.Module):
         _loss_h = torch.sum(pi * logpi, dim=-1)
         loss_h = torch.mean(_loss_h)  # entropy loss
 
-        loss_a = loss_p + 0.0001 * loss_h
+        loss_a = loss_p + 0.001 * loss_h
 
         # # -------------
 
@@ -182,7 +182,10 @@ class RLMahjong(nn.Module):
         # loss_a = loss_a.sum(dim=-1).mean()
         
         # --------- update model parameters ------------
-        loss = loss_c + loss_a
+        if self.update_times > 10000:
+            loss = loss_c + loss_a
+        else:
+            loss = loss_c
         
         self.optimizer.zero_grad()
         loss.backward()

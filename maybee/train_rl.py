@@ -52,7 +52,7 @@ class RLConfig(PythonConfig):
     train_start: int = 1000
     buffer_size: int = 20000
     temp: float = 1
-    resume: bool = True
+    resume: bool = False
 
     
 if __name__ == "__main__":
