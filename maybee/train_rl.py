@@ -4,10 +4,10 @@ import torch
 import time
 import os
 import traceback
-import logging
 
 from utilsd import setup_experiment, get_output_dir, get_checkpoint_dir
 from utilsd.experiment import print_config
+from utilsd.logging import print_log, setup_logger
 from utilsd.config import configclass, RegistryConfig, PythonConfig, ClassConfig, RuntimeConfig
 from arena.player import PLAYER
 from buffer import MajEncV2ReplayBuffer
@@ -18,7 +18,7 @@ from arena.logger import TenhouJsonLogger
 from arena.common import render_global_info, tile_to_tenhou, get_base_tile
 from dataclasses import field
 
-logging.basicConfig(level=logging.INFO)
+logger = setup_logger("logger")
 
 def is_prime(n):
     # 小于2的数不是素数
@@ -47,8 +47,12 @@ class RLConfig(PythonConfig):
     value_network: RegistryConfig[NETWORK]
     agent: RegistryConfig[MODEL]
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
-    save_interval: int = 1000
-    buffer_size: int = 2000
+    save_interval: int = 100000
+    stat_interval: int = 1000
+    train_start: int = 1000
+    buffer_size: int = 20000
+    temp: float = 1
+    resume: bool = True
 
     
 if __name__ == "__main__":
@@ -62,6 +66,10 @@ if __name__ == "__main__":
         # create checkpoint dir
         os.makedirs(get_checkpoint_dir())
    
+    if not os.path.exists(get_output_dir()):
+        # create output dir
+        os.makedirs(get_output_dir())
+
     players = [
         config.player1.build(),
         config.player2.build(),
@@ -75,8 +83,10 @@ if __name__ == "__main__":
                                value_network=value_network,
                                device='cuda'
                               )
+    if config.resume:
+        agent._resume(get_checkpoint_dir())
 
-    record_buffer = MajEncV2ReplayBuffer(max_num_seq=config.buffer_size, device='cuda')
+    record_buffer = MajEncV2ReplayBuffer(max_num_seq=config.buffer_size, device='cuda') 
 
     env = MahjongEnv()
     num_games = int(1e6)
@@ -84,6 +94,8 @@ if __name__ == "__main__":
     start_time = time.time()
     game = 0
     success_games = 0
+    for player in players:
+        player.reset_stats()
 
     winds = ["east", "south", "west", "north"]
 
@@ -91,7 +103,7 @@ if __name__ == "__main__":
 
         try:
 
-            env.reset(oya=game % 4, game_wind=winds[game % 3], kyoutaku=0, honba=0)
+            env.reset(oya=game % 4, game_wind=winds[game % 2], kyoutaku=0, honba=0)
             # env.reset(oya=2, game_wind='south', debug_mode=1)
 
             th_logger = TenhouJsonLogger()
@@ -137,7 +149,7 @@ if __name__ == "__main__":
                 
 
                 if curr_player_id == 0:   # only record player 0 (the RL agent)
-                    a, policy_prob = agent.select_action(obs, rcd, gin, valid_actions_mask, temp=3)
+                    a, policy_prob = agent.select_action(obs, rcd, gin, valid_actions_mask, temp=config.temp)
 
                     sin_array[step] = obs
                     oin = np.zeros([34, 54], dtype=bool)
@@ -153,23 +165,21 @@ if __name__ == "__main__":
                     policy_probs[step] = policy_prob
 
                     step += 1
-
-                    # test Q value, for debugging
-                    if step == 10 and is_prime(game):
-                        
-                        rcd_padded = np.concatenate([np.zeros([1, 55], dtype=bool), rcd], axis=0)
-
-                        q = agent.value_network(torch.from_numpy(obs[None, :]).cuda().float(),
-                                                torch.from_numpy(oin[None, :]).cuda().float(),
-                                                torch.from_numpy(rcd_padded[None, :]).cuda().float(),
-                                                torch.from_numpy(gin[None, :]).cuda().float())
-
-                        print("Q value of current action of player 0 = ", q[0, a].cpu().item())
-
+                
                 else:
                     a = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask)  # AI player does padding interiorly 
                                         
                 env.step(curr_player_id, a)
+
+                # test Q value, for debugging
+                if env.is_over() and is_prime(game) and step > 1:
+                    
+                    q = agent.value_network(torch.from_numpy(sin_array[step - 1: step]).cuda().float(),
+                                            torch.from_numpy(oin_array[step - 1: step]).cuda().float(),
+                                            torch.from_numpy(rcd_array[step - 1: step]).cuda().float(),
+                                            torch.from_numpy(gin_array[step - 1: step]).cuda().float())
+
+                    print("Q value = ", q[0, actions[step - 1]].cpu().item())
             
                 # ------- update state encoding ------------
                 te.update()
@@ -192,7 +202,8 @@ if __name__ == "__main__":
                     oin[:, (i - 1) * 18 : i * 18] = np.array(te.self_infos[(0 + i) % 4]).reshape([18, 34]).swapaxes(0, 1)
                 oin_array[step] = oin
 
-                rcd_array[step][1 : np.array(te.records[0]).shape[0] + 1] = np.array(te.records[0])  # with start token
+                if np.array(te.records[0]).ndim > 1:
+                    rcd_array[step][1 : np.array(te.records[0]).shape[0] + 1] = np.array(te.records[0])  # with start token
 
                 gin_array[step] = np.array(te.global_infos[0])
 
@@ -219,8 +230,8 @@ if __name__ == "__main__":
 
             # if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
             
-            if game > 10:
-                for _ in range(5):
+            if game > config.train_start:
+                for _ in range(1):
                     agent.update(record_buffer)
 
 
@@ -228,28 +239,29 @@ if __name__ == "__main__":
             
             game += 1
             time.sleep(0.1)
-            logging.info(
-                "-------------- execption in game {} -------------------------".format(game))
-            logging.info('Exception: ', inst)
-            logging.info("----------------- Traceback ---------------------------------")
+            print_log(
+                "-------------- execption in game {} -------------------------".format(game), logger=logger)
+            print_log('Exception: ', inst)
+            print_log("----------------- Traceback ---------------------------------", logger=logger)
             traceback.print_exc()
             env.render()
-            # logging.info("-------------- replayable log -------------------------------")
+            # print_log("-------------- replayable log -------------------------------", logger=logger)
             # env.t.print_debug_replay()
             continue
         
+        if game % config.stat_interval == 0:
+            for i, p in enumerate(players[:1]):
+                print_log("Player {} stats: \n{}".format(i, p.dump_stats()), logger=logger)
+                p.reset_stats()
+
         if game % config.save_interval == 0:
 
-            logging.info("==================================================================================")
+            print_log("==================================================================================", logger=logger)
             
-            logging.info("Total time: {:.2f}s".format(time.time() - start_time))
-            logging.info("Success games: {}".format(success_games))
+            print_log("Total time: {:.2f}s".format(time.time() - start_time), logger=logger)
+            print_log("Success games: {}".format(success_games), logger=logger)
             
             # TODO: save model
-            agent._checkpoint(get_checkpoint_dir())
-
-            for i, p in enumerate(players[:1]):
-                logging.info("Player {} stats: \n{}".format(i, p.dump_stats()))
-                p.reset_stats()
+            agent._checkpoint(get_output_dir())
             
-            logging.info("==================================================================================")
+            print_log("==================================================================================", logger=logger)

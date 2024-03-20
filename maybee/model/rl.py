@@ -84,7 +84,7 @@ class RLMahjong(nn.Module):
         self.actor_network = actor_network
         self.gamma = gamma
 
-        self.grape = GRAPE(alpha=0.5, gamma=gamma, lambd=0.8) # TODO: search
+        self.grape = GRAPE(alpha=0.99, gamma=gamma, lambd=0) # TODO: search
         
         self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4) # TODO
         self.target_value_network = deepcopy(value_network)
@@ -105,11 +105,14 @@ class RLMahjong(nn.Module):
         self.train()
 
         # sample a batch of data from replay buffer
-        batch = buffer.sample_contiguous_batch(num_seq=20)
+        batch = buffer.sample_contiguous_batch(num_seq=100)
         
         self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, rewards, dones, lengths = batch
 
-        action_masks = torch.cat([action_masks, torch.ones_like(action_masks[:1])], dim=0)
+        action_masks = action_masks.to(torch.float)
+        action_masks = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) * 100
+        action_masks_p = torch.cat([action_masks, torch.zeros_like(action_masks[:1])], dim=0)
+
         # self.infos = self_infos.float()
         # others_infos = others_infos.float()
         # records = records.float()
@@ -138,7 +141,7 @@ class RLMahjong(nn.Module):
         q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
         with torch.no_grad():
             # q_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
-            pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach(), dim=-1) * action_masks
+            pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p, dim=-1) 
             pi = pi / pi.sum(dim=-1, keepdim=True)
             q_grape, adv = self.grape.compute_targets(q.detach(), pi, actions, rewards, policy_probs, dones)
 
@@ -148,37 +151,46 @@ class RLMahjong(nn.Module):
 
         # -------- update actor network ------------
 
-        # logits = self.actor_network(self_infos, records, global_infos)
-
-        # # from GRAPE ---
-        # logpi = logits - torch.logsumexp(logits).sum(dim=-1, keepdim=True)
-        # r = self.pi_ / self.mu_ph
-        # adv = torch.sum(self.advantage_ph * one_hot_actio+n, dim=1)
-        # obj_pi = r * adv
-        # loss_p = tf.reduce_mean(- obj_pi, name='policy_loss')
-        # _loss_h = tf.reduce_sum(self.pi * logpi, axis=1)
-        # loss_h = tf.reduce_mean(_loss_h, name='negative_entropy')
+        logits = self.actor_network(self_infos, records, global_infos)[:-1]
         
+        # from GRAPE ---
+        logpi = torch.log_softmax(logits + action_masks, dim=-1)
+        pi = torch.softmax(logits + action_masks, dim=-1)
+
+        if np.random.rand() < 0.01:
+            print(np.array2string(pi[5].cpu().detach().numpy(), precision=4, suppress_small=True))
+            print(np.array2string(adv[5].cpu().detach().numpy(), precision=4, suppress_small=True))
+
+        one_hot_action = nn.functional.one_hot(actions.to(torch.int64), num_classes=pi.shape[-1]) # convert actions to one-hot
+
+        r =  torch.sum((pi / policy_probs.clamp(1e-2, torch.inf)) * one_hot_action, dim=-1)
+        adv_a = torch.sum(adv.detach() * one_hot_action, dim=-1)
+        obj_pi = r * adv_a
+
+        loss_p = torch.mean(- obj_pi) # policy gradient loss
+        _loss_h = torch.sum(pi * logpi, dim=-1)
+        loss_h = torch.mean(_loss_h)  # entropy loss
+
+        loss_a = loss_p + 0.0001 * loss_h
+
         # # -------------
 
-        # # print(advantage.shape, logits.shape, action_masks.shape)
-        # # policy gradient algorithm to update actor network
+        # print(advantage.shape, logits.shape, action_masks.shape)
+        # policy gradient algorithm to update actor network
 
         # loss_a = - advantage * torch.log_softmax(logits, dim=-1) * action_masks
         # loss_a = loss_a.sum(dim=-1).mean()
         
         # --------- update model parameters ------------
-        # if self.update_times > 5000:
-        #     loss = loss_a + loss_c
-        # else:
-        loss = loss_c
+        loss = loss_c + loss_a
         
         self.optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(self.parameters(), 10)
         self.optimizer.step()
 
         # -------- update target value network ------------
-        if self.update_times % 1000 == 0:
+        if self.update_times % 500 == 0:
             self.target_value_network.load_state_dict(self.value_network.state_dict())
 
         self.update_times += 1
@@ -236,7 +248,9 @@ class RLMahjong(nn.Module):
         )
         print(f"Checkpoint saved to {self.checkpoint_dir / 'resume.pth' if checkpoint_dir is None else checkpoint_dir / 'resume.pth'}", __name__)
 
-    def _resume(self):
+    def _resume(self, checkpoint_dir):
+        if checkpoint_dir is not None:
+            self.checkpoint_dir = Path(checkpoint_dir)
         if (self.checkpoint_dir / "resume.pth").exists():
             print(f"Resume from {self.checkpoint_dir / 'resume.pth'}", __name__)
             checkpoint = torch.load(self.checkpoint_dir / "resume.pth")

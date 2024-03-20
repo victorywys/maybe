@@ -102,7 +102,7 @@ class MajEncV2ReplayBuffer:
         self.tail = (self.tail + 1) % self.max_num_seq
         self.size = min(self.size + 1, self.max_num_seq)
 
-    def sample_contiguous_batch(self, num_seq=32):
+    def sample_contiguous_batch(self, num_seq=32, random_mps_change=True):
         # sample num_seq episodes, each episode is a contiguous sequence, concatenate them to a batch
         sampled_episodes = torch.from_numpy(np.random.choice(self.size, [num_seq])).to(torch.int64)
 
@@ -124,6 +124,18 @@ class MajEncV2ReplayBuffer:
         global_infos_b = torch.cat([tmp[:n] for (tmp, n) in zip(self.global_infos[sampled_episodes], length_bp1)], dim=0)
         records_b = torch.cat([tmp[:n] for (tmp, n) in zip(self.records[sampled_episodes], length_bp1)], dim=0).float()
         
+
+        if random_mps_change:
+            order = np.array([0, 1, 2], dtype=int)
+            np.random.shuffle(order)
+            indices = np.concatenate([order[0]*9 + np.arange(9), order[1]*9 + np.arange(9), order[2]*9 + np.arange(9), np.arange(27, 34)])
+            indices_rcd = np.concatenate([order[0]*9 + np.arange(9), order[1]*9 + np.arange(9), order[2]*9 + np.arange(9), np.arange(27, 34), order + 34, np.arange(37, 55)])
+
+            self_infos_b = self_infos_b[:, indices, :]
+            others_infos_b = others_infos_b[:, indices, :]
+
+            records_b = records_b[:, :, indices_rcd]
+
         rcd_lens = []
         
         rcd_sum  = torch.sum(torch.abs(records_b), dim=-1)  # [batch_size, max_rcd_len]
