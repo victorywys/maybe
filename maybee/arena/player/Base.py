@@ -43,8 +43,8 @@ class Statistics():
     def update(self, t: pm.Table, player_id: int):
         self.total_games += 1
 
-        self.total_score += t.players[player_id].score - 25000
-        # self.total_score += t.get_result().results[player_id].score1
+        # self.total_score += t.players[player_id].score - 25000
+        self.total_score += t.get_result().score[player_id] - 25000
 
         if t.players[player_id].is_riichi():
             self.total_riichi += 1

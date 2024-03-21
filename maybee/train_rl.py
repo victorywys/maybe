@@ -195,7 +195,7 @@ if __name__ == "__main__":
                 # test Q value, for debugging
                 if env.is_over() and is_prime(game) and step > 1:
                     
-                    q = agent.value_network_1(torch.from_numpy(sin_array[step - 1: step]).cuda().float(),
+                    q = agent.value_network(torch.from_numpy(sin_array[step - 1: step]).cuda().float(),
                                             torch.from_numpy(oin_array[step - 1: step]).cuda().float(),
                                             torch.from_numpy(rcd_array[step - 1: step]).cuda().float(),
                                             torch.from_numpy(gin_array[step - 1: step]).cuda().float())

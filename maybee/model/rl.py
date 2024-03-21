@@ -183,7 +183,7 @@ class RLMahjong(nn.Module):
             entropy = - torch.sum(pi * logpi, dim=-1)
                         
             loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1.detach() * pi, dim=-1)
-            loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old))
+            loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old.detach()))
 
             # debug
             # print("pi : %3.3f" % (pi.detach().cpu().numpy().mean()))
@@ -193,7 +193,7 @@ class RLMahjong(nn.Module):
             # print("log_alpha : %3.3f" % (self.log_alpha.detach().cpu().numpy()))
             # print("alpha : %3.3f" % (self.log_alpha.detach().exp().cpu().numpy()))
 
-            if np.random.rand() < 0.05:
+            if np.random.rand() < 0.02:
                 print("----------- 抽查 ------------")
                 rnd_idx = np.random.randint(0, int(pi.shape[0]))
                 pi_np = pi[rnd_idx].detach().cpu().numpy().reshape([-1])
@@ -225,7 +225,7 @@ class RLMahjong(nn.Module):
             logpi = torch.log_softmax(logits + action_masks, dim=-1)
             pi = torch.softmax(logits + action_masks, dim=-1)
 
-            if np.random.rand() < 0.1:
+            if np.random.rand() < 0.02:
                 print("----------- 抽查 ------------")
                 rnd_idx = np.random.randint(0, int(adv.shape[0]))
                 adv_np = adv[rnd_idx].detach().cpu().numpy().reshape([-1])
