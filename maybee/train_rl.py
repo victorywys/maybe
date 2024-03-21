@@ -49,18 +49,18 @@ class RLConfig(PythonConfig):
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     # online learning setting
-    save_interval: int = 100000
+    save_interval: int = 20000
     stat_interval: int = 1000
     resume: bool = False  # whether to resume from checkpoint
 
     # RL general
     algorithm: str = "dsac"  # dsac, grape
     gamma: float = 0.999
-    train_start: int = 10000
+    train_start: int = 5000
     buffer_size: int = 10000
     batch_seq_num: int = 50
     grad_step_num_per_game: int = 1
-    actor_training_offset: int = 1000  # how many steps of value training before policy training
+    actor_training_offset: int = 2000  # how many steps of value training before policy training
     lr_value: float = 3e-5
     lr_actor: float = 3e-5
 
@@ -68,8 +68,8 @@ class RLConfig(PythonConfig):
     lr_alpha: float = 3e-4
     clip_q_epsilon: float = 1.0
     target_entropy: float = 0.7
-    entropy_penalty_beta: float = 0.5    
-    use_avg_q: bool = False
+    entropy_penalty_beta: float = 0.05
+    use_avg_q: int = 0
 
     # GRAPE
     alpha_grape: float = 0.99

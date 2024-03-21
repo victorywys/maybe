@@ -143,8 +143,8 @@ class RLMahjong(nn.Module):
         policy_normed = (policy_probs * action_masks) / (1e-6 + (policy_probs * action_masks).sum(dim=-1, keepdim=True))
         entropy_old = - torch.sum(policy_normed * torch.log(policy_normed + 1e-9), dim=-1).detach()
 
-        action_masks = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) * 10000  # [-10000, -10000, 0, 0, -10000, -10000, ....]
-        action_masks_p = torch.cat([action_masks, torch.zeros_like(action_masks[:1])], dim=0)
+        action_masks_ = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) * 10000  # [-10000, -10000, 0, 0, -10000, -10000, ....]
+        action_masks_p_ = torch.cat([action_masks_, torch.zeros_like(action_masks_[:1])], dim=0)
 
         if self.algorithm == "dsac":
             
@@ -155,7 +155,7 @@ class RLMahjong(nn.Module):
                 q_tar_tp1_1 = self.target_value_network_1(self_infos, others_infos, records, global_infos)[1:]
                 q_tar_tp1_2 = self.target_value_network_2(self_infos, others_infos, records, global_infos)[1:]
                 
-                pi_tp1 = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p, dim=-1)[1:]
+                pi_tp1 = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_, dim=-1)[1:]
                 if self.config.use_avg_q:
                     y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * (
                         torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1) + torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) / 2
@@ -178,8 +178,13 @@ class RLMahjong(nn.Module):
 
             # -------- actor learning ----------
             logits = self.actor_network(self_infos, records, global_infos)[:-1]
-            pi = torch.softmax(logits + action_masks, dim=-1)
-            logpi = torch.log_softmax(logits + action_masks, dim=-1)
+            pi = torch.softmax(logits, dim=-1)
+            
+            pi = pi * action_masks
+            pi = pi / (1e-6 + pi.sum(dim=-1, keepdim=True))
+            
+            logpi = torch.log(pi + 1e-20) * action_masks
+
             entropy = - torch.sum(pi * logpi, dim=-1)
                         
             loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1.detach() * pi, dim=-1)

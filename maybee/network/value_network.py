@@ -39,7 +39,14 @@ class QNetwork(nn.Module):
         self.info_encoder = AllInfoEncoder()
         self.record_encoder = RecordEncoder()
         self.global_info_encoder = GlobalInfoEncoder()
-        self.net = nn.Sequential(
+        self.v_net = nn.Sequential(
+            nn.Linear(self.info_encoder.out_dim + self.record_encoder.out_dim + self.global_info_encoder.out_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1)
+        )
+        self.a_net = nn.Sequential(
             nn.Linear(self.info_encoder.out_dim + self.record_encoder.out_dim + self.global_info_encoder.out_dim, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
@@ -53,6 +60,11 @@ class QNetwork(nn.Module):
         x2 = self.record_encoder(records)
         x3 = self.global_info_encoder(global_info)
         y = torch.cat([x1, x2, x3], dim=1)
-        
-        return self.net(y)
+
+        value = self.v_net(y)
+        advantages = self.a_net(y)
+        # Q = V(s) + A(s,a) - mean(A(s,a'))
+        q_values = value + (advantages - advantages.mean(dim=1, keepdim=True))
+
+        return q_values
 
