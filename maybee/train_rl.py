@@ -47,13 +47,36 @@ class RLConfig(PythonConfig):
     value_network: RegistryConfig[NETWORK]
     agent: RegistryConfig[MODEL]
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+
+    # online learning setting
     save_interval: int = 100000
     stat_interval: int = 1000
-    train_start: int = 1000
-    buffer_size: int = 20000
-    temp: float = 1
-    resume: bool = False
+    resume: bool = False  # whether to resume from checkpoint
 
+    # RL general
+    algorithm: str = "dsac"  # dsac, grape
+    gamma: float = 0.999
+    train_start: int = 10000
+    buffer_size: int = 10000
+    batch_seq_num: int = 50
+    grad_step_num_per_game: int = 1
+    actor_training_offset: int = 1000  # how many steps of value training before policy training
+    lr_value: float = 3e-5
+    lr_actor: float = 3e-5
+
+    # Discrete SAC (Zhou et al.)
+    lr_alpha: float = 3e-4
+    clip_q_epsilon: float = 1.0
+    target_entropy: float = 0.7
+    entropy_penalty_beta: float = 0.5    
+    use_avg_q: bool = False
+
+    # GRAPE
+    alpha_grape: float = 0.99
+    lambd_grape: float = 0.5
+    temp: float = 1.0  # policy temperature
+    coef_entropy: float = 0.01
+    
     
 if __name__ == "__main__":
 
@@ -77,10 +100,8 @@ if __name__ == "__main__":
         config.player4.build(),
     ]
     
-    value_network=config.value_network.build()
-
     agent = config.agent.build(actor_network=players[0].model,
-                               value_network=value_network,
+                               config=config,
                                device='cuda'
                               )
     if config.resume:
@@ -174,7 +195,7 @@ if __name__ == "__main__":
                 # test Q value, for debugging
                 if env.is_over() and is_prime(game) and step > 1:
                     
-                    q = agent.value_network(torch.from_numpy(sin_array[step - 1: step]).cuda().float(),
+                    q = agent.value_network_1(torch.from_numpy(sin_array[step - 1: step]).cuda().float(),
                                             torch.from_numpy(oin_array[step - 1: step]).cuda().float(),
                                             torch.from_numpy(rcd_array[step - 1: step]).cuda().float(),
                                             torch.from_numpy(gin_array[step - 1: step]).cuda().float())
@@ -231,7 +252,7 @@ if __name__ == "__main__":
             # if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
             
             if game > config.train_start:
-                for _ in range(1):
+                for _ in range(config.grad_step_num_per_game):
                     agent.update(record_buffer)
 
 

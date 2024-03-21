@@ -12,6 +12,7 @@ import torch.nn as nn
 from torch.utils.tensorboard.writer  import SummaryWriter
 from torch.utils.data import DataLoader
 from utilsd import use_cuda
+from utilsd.config import PythonConfig
 
 from .base import MODEL
 
@@ -20,6 +21,7 @@ from dataset import supervised_collate_fn, MultiFileSampler
 import os
 from copy import deepcopy
 
+from arena.common import *
 
 class GRAPE:
     """
@@ -31,7 +33,7 @@ class GRAPE:
         self.gamma = gamma
         self.lambd = lambd
 
-    def compute_targets(self, q, pi, a_t, r_t, mu_t, done_t):
+    def compute_targets(self, q, q_tar, pi, a_t, r_t, mu_t, done_t):
         """
         Compute G Q (s, a) + a A (s, a), and return a tuple of (G Q  (s, a) + a A  (s, a), A (s, \cdot))
         q_t   = s[:-1]
@@ -39,7 +41,7 @@ class GRAPE:
         """
         l = q.shape[0] - 1
         pi_t, pi_tp1 = pi[:-1], pi[1:]
-        q_t, q_tp1 = q[:-1], q[1:]
+        q_t, q_tp1 = q[:-1], q_tar[1:]
         q_t_a = q_t[np.arange(l), a_t]
         v_t, v_tp1 = torch.sum(pi_t * q_t, dim=1), torch.sum(pi_tp1 * q_tp1, dim=1)
         q_t_a_est = r_t + (1. - done_t) * self.gamma * v_tp1
@@ -63,38 +65,63 @@ class GRAPE:
 
         return targets_q, advantages
 
+class TwinQNetwork(nn.Module):
+    def __init__(self, q1, q2):
+        super(TwinQNetwork, self).__init__()
+        self.q1 = q1
+        self.q2 = q2
+
+    def forward(self, self_info, others_info, records, global_info):
+        q1 = self.q1(self_info, others_info, records, global_info)
+        q2 = self.q2(self_info, others_info, records, global_info)
+        return q1
 
 @MODEL.register_module()
 class RLMahjong(nn.Module):
     def __init__(
         self,
-        # batch_size: int = 256,
         actor_network: Optional[nn.Module] = None,
-        value_network: Optional[nn.Module] = None,
-        output_dir: Optional[str] = None,
-        checkpoint_dir: Optional[str] = None,
+        # value_network: Optional[nn.Module] = None,
+        # output_dir: Optional[str] = None,
+        # checkpoint_dir: Optional[str] = None,
         # ranking_rewards: Optional[list] = [45, 5, -15, -35],
         device: Optional[str] = "cuda",
-        gamma: Optional[float] = 0.999,
+        config: Optional[PythonConfig] = None,
     ):
         # self.batch_size = batch_size
         super(RLMahjong, self).__init__()
 
-        self.value_network = value_network
+        # self.value_network = value_network
         self.actor_network = actor_network
-        self.gamma = gamma
+        self.gamma = config.gamma
+        self.config = config
+        self.algorithm = config.algorithm
 
-        self.grape = GRAPE(alpha=0.99, gamma=gamma, lambd=0) # TODO: search
-        
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4) # TODO
-        self.target_value_network = deepcopy(value_network)
+        if self.config.algorithm == "grape":
+            self.grape = GRAPE(alpha=config.alpha_grape, gamma=self.gamma, lambd=config.lambd_grape)
+            self.value_network = config.value_network.build()
+            self.target_value_network = deepcopy(self.value_network)
+
+        elif self.config.algorithm == "dsac":
+            self.log_alpha = nn.Parameter(torch.tensor(-3, requires_grad=True, dtype=torch.float32))
+            self.optimizer_alpha = torch.optim.Adam([self.log_alpha], lr=config.lr_alpha)
+            self.value_network_1 = config.value_network.build()
+            self.value_network_2 = config.value_network.build()
+            self.target_value_network_1 = deepcopy(self.value_network_1)
+            self.target_value_network_2 = deepcopy(self.value_network_2)
+            self.value_network = TwinQNetwork(self.value_network_1, self.value_network_2)
+            self.target_value_network = TwinQNetwork(self.target_value_network_1, self.target_value_network_2)
+
+        self.optimizer_a = torch.optim.Adam(self.actor_network.parameters(), lr=config.lr_actor)
+        self.optimizer_v = torch.optim.Adam(self.value_network.parameters(), lr=config.lr_value)  # TODO: two Q networks
 
         self.update_times = 0
 
         self.mse_loss = nn.MSELoss()
+        self.huber_loss = nn.HuberLoss(delta=self.config.clip_q_epsilon)
         self.device = torch.device(device)
         self.to(device=self.device)
-    
+
     def _init_logger(self, log_dir):
         self.log_dir = log_dir
         self.writer = SummaryWriter(log_dir=self.log_dir)
@@ -105,96 +132,150 @@ class RLMahjong(nn.Module):
         self.train()
 
         # sample a batch of data from replay buffer
-        batch = buffer.sample_contiguous_batch(num_seq=100)
+        batch = buffer.sample_contiguous_batch(num_seq=self.config.batch_seq_num)
         
         self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, rewards, dones, lengths = batch
 
         action_masks = action_masks.to(torch.float)
-        action_masks = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) * 100
+
+        n_valid_actions = action_masks.sum(dim=-1).to(torch.float)
+
+        policy_normed = (policy_probs * action_masks) / (1e-6 + (policy_probs * action_masks).sum(dim=-1, keepdim=True))
+        entropy_old = - torch.sum(policy_normed * torch.log(policy_normed + 1e-9), dim=-1).detach()
+
+        action_masks = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) * 10000  # [-10000, -10000, 0, 0, -10000, -10000, ....]
         action_masks_p = torch.cat([action_masks, torch.zeros_like(action_masks[:1])], dim=0)
 
-        # self.infos = self_infos.float()
-        # others_infos = others_infos.float()
-        # records = records.float()
-        # max_len = int(torch.max(lengths).item())
+        if self.algorithm == "dsac":
+            
+            # -------- critic learning ----------
+            q1 = self.value_network_1(self_infos, others_infos, records, global_infos)[:-1] # [batch_size, action_dim]
+            q2 = self.value_network_2(self_infos, others_infos, records, global_infos)[:-1] # [batch_size, action_dim]
+            with torch.no_grad():
+                q_tar_tp1_1 = self.target_value_network_1(self_infos, others_infos, records, global_infos)[1:]
+                q_tar_tp1_2 = self.target_value_network_2(self_infos, others_infos, records, global_infos)[1:]
+                
+                pi_tp1 = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p, dim=-1)[1:]
+                if self.config.use_avg_q:
+                    y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * (
+                        torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1) + torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) / 2
+                else:
+                    y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * torch.minimum(
+                        torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1), torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1))
+                    
+            loss_c_1 = torch.mean(self.huber_loss(q1[np.arange(rewards.shape[0]), actions], y.detach()))
+            loss_c_2 = torch.mean(self.huber_loss(q2[np.arange(rewards.shape[0]), actions], y.detach()))
+            loss_c = loss_c_1 + loss_c_2
 
-        # self_infos = self_infos[:, :max_len + 1]
-        # others_infos = others_infos[:, :max_len + 1]
-        # # records = records[:, :max_len + 1] Records is already PackedSequence
-        # global_infos = global_infos[:, :max_len + 1]
-        # actions = actions[:, :max_len]
-        # action_masks = action_masks[:, :max_len]
-        # rewards = rewards[:, :max_len]
-        # dones = dones[:, :max_len]
+            # debug
+            # print("loss_c_1 : %3.3f" % (loss_c_1.detach().cpu().numpy()))
+            # print("loss_c_2 : %3.3f" % (loss_c_2.detach().cpu().numpy()))
+            # print("loss_c : %3.3f" % (loss_c.detach().cpu().numpy()))
+            # print("y : %3.3f" % (y.detach().cpu().numpy().mean()))
+            # print("q1 : %3.3f" % (q1.detach().cpu().numpy().mean()))
+            # print("q2 : %3.3f" % (q2.detach().cpu().numpy().mean()))
+            # print("entropy_old : %3.3f" % (entropy_old.detach().cpu().numpy().mean()))
 
-        # for tmp in [self_infos, others_infos, global_infos]:
-        #     tmp = tmp[:, :max_len + 1].clone()
-        
-        # for tmp in [actions, action_masks, rewards, dones]:
-        #     tmp = tmp[:, :max_len].clone()
+            # -------- actor learning ----------
+            logits = self.actor_network(self_infos, records, global_infos)[:-1]
+            pi = torch.softmax(logits + action_masks, dim=-1)
+            logpi = torch.log_softmax(logits + action_masks, dim=-1)
+            entropy = - torch.sum(pi * logpi, dim=-1)
+                        
+            loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1.detach() * pi, dim=-1)
+            loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old))
+
+            # debug
+            # print("pi : %3.3f" % (pi.detach().cpu().numpy().mean()))
+            # print("logpi : %3.3f" % (logpi.detach().cpu().numpy().mean()))
+            # print("loss_a : %3.3f" % (loss_a.detach().cpu().numpy()))
+            # print("entropy : %3.3f" % (entropy.detach().cpu().numpy().mean()))
+            # print("log_alpha : %3.3f" % (self.log_alpha.detach().cpu().numpy()))
+            # print("alpha : %3.3f" % (self.log_alpha.detach().exp().cpu().numpy()))
+
+            if np.random.rand() < 0.05:
+                print("----------- 抽查 ------------")
+                rnd_idx = np.random.randint(0, int(pi.shape[0]))
+                pi_np = pi[rnd_idx].detach().cpu().numpy().reshape([-1])
+                for idx in np.argwhere(pi_np):
+                    print(action_v2_to_human_chinese[int(idx)] + " policy prob : %3.3f" % (pi_np[int(idx)]))
+                print("alpha = {}".format(self.log_alpha.detach().exp().cpu().numpy()))
+                print("entropy = %3.3f" % (entropy.detach().cpu().numpy().mean()))
+                print("entropy_old = %3.3f" % (entropy_old.detach().cpu().numpy().mean()))
+
+            loss_alpha = - self.log_alpha * torch.mean((self.config.target_entropy - entropy.detach()))
+            loss_a = loss_a + loss_alpha
 
         # -------- update value network ------------
+        elif self.algorithm == "grape":
+            q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
+            with torch.no_grad():
+                q_tar = self.target_value_network(self_infos, others_infos, records, global_infos)
+                pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p, dim=-1) 
+                pi = pi / pi.sum(dim=-1, keepdim=True)
+                q_grape, adv = self.grape.compute_targets(q.detach(), q_tar.detach(), pi, actions, rewards, policy_probs, dones)
+            
+            loss_c = self.mse_loss(q[np.arange(rewards.shape[0]), actions], q_grape.detach())
 
-        # include oracle information to better estimate value function (asymmetric actor critic)
-        # hand_infos = torch.cat([self_infos, others_infos], dim=-1)
-        
-        q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
-        with torch.no_grad():
-            # q_tar = self.target_value_network(self_infos, others_infos, records, global_infos).detach()
-            pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p, dim=-1) 
-            pi = pi / pi.sum(dim=-1, keepdim=True)
-            q_grape, adv = self.grape.compute_targets(q.detach(), pi, actions, rewards, policy_probs, dones)
+            # -------- update actor network ------------
 
-        # print(q_grape.shape, adv.shape)  [batch_size],  [batch_size, action_dim]
-        
-        loss_c = self.mse_loss(q[np.arange(rewards.shape[0]), actions], q_grape.detach())
+            logits = self.actor_network(self_infos, records, global_infos)[:-1]
+            
+            # from GRAPE ---
+            logpi = torch.log_softmax(logits + action_masks, dim=-1)
+            pi = torch.softmax(logits + action_masks, dim=-1)
 
-        # -------- update actor network ------------
+            if np.random.rand() < 0.1:
+                print("----------- 抽查 ------------")
+                rnd_idx = np.random.randint(0, int(adv.shape[0]))
+                adv_np = adv[rnd_idx].detach().cpu().numpy().reshape([-1])
+                pi_np = pi[rnd_idx].detach().cpu().numpy().reshape([-1])
+                for idx in np.argwhere(pi_np):
+                    print(action_v2_to_human_chinese[int(idx)] + " policy prob : %3.3f" % (pi_np[int(idx)]) + "; advantage : %5.5f" % (adv_np[int(idx)]))
 
-        logits = self.actor_network(self_infos, records, global_infos)[:-1]
-        
-        # from GRAPE ---
-        logpi = torch.log_softmax(logits + action_masks, dim=-1)
-        pi = torch.softmax(logits + action_masks, dim=-1)
+            one_hot_action = nn.functional.one_hot(actions.to(torch.int64), num_classes=pi.shape[-1]) # convert actions to one-hot
 
-        if np.random.rand() < 0.01:
-            print(np.array2string(pi[5].cpu().detach().numpy(), precision=4, suppress_small=True))
-            print(np.array2string(adv[5].cpu().detach().numpy(), precision=4, suppress_small=True))
+            r =  torch.sum((pi / policy_probs.clamp(1e-3, torch.inf)) * one_hot_action, dim=-1)
+            adv_a = torch.sum(adv.detach() * one_hot_action, dim=-1)
+            obj_pi = r * adv_a
 
-        one_hot_action = nn.functional.one_hot(actions.to(torch.int64), num_classes=pi.shape[-1]) # convert actions to one-hot
+            loss_p = torch.mean(- obj_pi) # policy gradient loss
+            _loss_h = torch.sum(pi * logpi, dim=-1)
+            loss_h = torch.mean(_loss_h)  # entropy loss
 
-        r =  torch.sum((pi / policy_probs.clamp(1e-3, torch.inf)) * one_hot_action, dim=-1)
-        adv_a = torch.sum(adv.detach() * one_hot_action, dim=-1)
-        obj_pi = r * adv_a
-
-        loss_p = torch.mean(- obj_pi) # policy gradient loss
-        _loss_h = torch.sum(pi * logpi, dim=-1)
-        loss_h = torch.mean(_loss_h)  # entropy loss
-
-        loss_a = loss_p + 0.001 * loss_h
-
-        # # -------------
-
-        # print(advantage.shape, logits.shape, action_masks.shape)
-        # policy gradient algorithm to update actor network
-
-        # loss_a = - advantage * torch.log_softmax(logits, dim=-1) * action_masks
-        # loss_a = loss_a.sum(dim=-1).mean()
+            loss_a = loss_p + self.config.coef_entropy * loss_h
         
         # --------- update model parameters ------------
-        if self.update_times > 10000:
-            loss = loss_c + loss_a
+        if self.config.actor_training_offset > 0:
+            if self.update_times > self.config.actor_training_offset:
+                loss = loss_c + loss_a
+            else:
+                loss = loss_c
         else:
-            loss = loss_c
+            if self.update_times >= - self.config.actor_training_offset:
+                loss = loss_c + loss_a
+            else:
+                loss = loss_a
         
-        self.optimizer.zero_grad()
+        self.optimizer_a.zero_grad()
+        self.optimizer_v.zero_grad()
+        if self.algorithm == "dsac":
+            self.optimizer_alpha.zero_grad()
+        
         loss.backward()
         nn.utils.clip_grad_norm_(self.parameters(), 10)
-        self.optimizer.step()
 
-        # -------- update target value network ------------
-        if self.update_times % 500 == 0:
-            self.target_value_network.load_state_dict(self.value_network.state_dict())
+        self.optimizer_a.step()
+        self.optimizer_v.step()
+        if self.algorithm == "dsac":
+            self.optimizer_alpha.step()
+
+        # -------- soft-update target value network ------------
+        state_dict = self.value_network.state_dict()
+        state_dict_tar = self.target_value_network.state_dict()
+        for key in state_dict.keys():
+            state_dict[key] = 0.995 * state_dict_tar[key] + 0.005 * state_dict[key]
+        self.target_value_network.load_state_dict(state_dict)
 
         self.update_times += 1
 
@@ -235,7 +316,7 @@ class RLMahjong(nn.Module):
         torch.save(
             {
                 "model": self.state_dict(),
-                "optim": self.optimizer.state_dict(),
+                # "optim": self.optimizer.state_dict(),
                 "update_times": self.update_times
             },
             self.checkpoint_dir / f"resume_{self.update_times}.pth" if checkpoint_dir is None else checkpoint_dir / f"resume_{self.update_times}.pth",
@@ -244,7 +325,7 @@ class RLMahjong(nn.Module):
         torch.save(
             {
                 "model": self.state_dict(),
-                "optim": self.optimizer.state_dict(),
+                # "optim": self.optimizer.state_dict(),
                 "update_times": self.update_times,
             },
             self.checkpoint_dir / "resume.pth" if checkpoint_dir is None else checkpoint_dir / "resume.pth",
@@ -258,7 +339,7 @@ class RLMahjong(nn.Module):
             print(f"Resume from {self.checkpoint_dir / 'resume.pth'}", __name__)
             checkpoint = torch.load(self.checkpoint_dir / "resume.pth")
             self.load_state_dict(checkpoint["model"])
-            self.optimizer.load_state_dict(checkpoint["optim"])
+            # self.optimizer.load_state_dict(checkpoint["optim"])
             self.update_times = checkpoint["update_times"]
             
         else:

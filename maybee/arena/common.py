@@ -24,6 +24,22 @@ human_to_tile = {
     tile: i for i, tile in enumerate(tile_to_human)
 }
 
+action_v2_to_human = [
+    "1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m",
+    "1p", "2p", "3p", "4p", "5p", "6p", "7p", "8p", "9p",
+    "1s", "2s", "3s", "4s", "5s", "6s", "7s", "8s", "9s",
+    "East (1z)", "South (2z)", "West (3z)", "North (4z)", "Haku (5z)", "Hatsu (6z)", "Chu (7z)", "0m (red 5m)", "0p (red 5p)",
+    "0s (red 5s)", "CHILEFT", "CHIMIDDLE", "CHIRIGHT", "CHILEFT_RED", "CHIMIDDLE_RED", "CHIRIGHT_RED", "PON", "PON_RED",
+    "ANKAN", "MINKAN", "KAKAN", "RIICHI", "RON", "TSUMO", "PUSH", "PASS_RIICHI", "PASS_RESPONSE"]
+
+action_v2_to_human_chinese = [
+    "一万", "二万", "三万", "四万", "五万", "六万", "七万", "八万", "九万",
+    "一筒", "二筒", "三筒", "四筒", "五筒", "六筒", "七筒", "八筒", "九筒",
+    "一索", "二索", "三索", "四索", "五索", "六索", "七索", "八索", "九索",
+    "东风", "南风", "西风", "北风", "白板", "发财", "中", "赤五万", "赤五筒",
+    "赤五索", "吃左", "吃中", "吃右", "红吃左", "红吃中", "红吃右", "碰", "红碰",
+    "暗杠", "明杠", "加杠", "立直", "荣和", "自摸", "推九九", "不立直", "过"]
+
 # human_to_tile["0m"] = 4
 # human_to_tile["0p"] = 13
 # human_to_tile["0s"] = 22
