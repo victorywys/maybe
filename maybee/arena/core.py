@@ -1,4 +1,7 @@
-from typing import Literal, List, Optional
+try:
+    from typing import Literal, List, Optional
+except:
+    from typing_extensions import Literal, List, Optional
 
 from .player import BasePlayer
 from .match import Match

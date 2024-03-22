@@ -1,4 +1,7 @@
-from typing import Optional
+try:
+    from typing import Optional
+except:
+    from typing_extensions import Optional
 
 from collections import OrderedDict
 

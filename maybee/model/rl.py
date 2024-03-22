@@ -132,7 +132,7 @@ class RLMahjong(nn.Module):
         self.train()
 
         # sample a batch of data from replay buffer
-        batch = buffer.sample_contiguous_batch(num_seq=self.config.batch_seq_num)
+        batch = buffer.sample_contiguous_batch(num_seq=self.config.batch_seq_num, random_mps_change=self.config.random_mps_change)
         
         self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, rewards, dones, lengths = batch
 
@@ -143,7 +143,7 @@ class RLMahjong(nn.Module):
         policy_normed = (policy_probs * action_masks) / (1e-6 + (policy_probs * action_masks).sum(dim=-1, keepdim=True))
         entropy_old = - torch.sum(policy_normed * torch.log(policy_normed + 1e-9), dim=-1).detach()
 
-        action_masks_ = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) * 10000  # [-10000, -10000, 0, 0, -10000, -10000, ....]
+        action_masks_ = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) # [-1, -1, 0, 0, -1, -1, ....]
         action_masks_p_ = torch.cat([action_masks_, torch.zeros_like(action_masks_[:1])], dim=0)
 
         if self.algorithm == "dsac":
@@ -187,16 +187,18 @@ class RLMahjong(nn.Module):
 
             # -------- actor learning ----------
             logits = self.actor_network(self_infos, records, global_infos)[:-1]
-            pi = torch.softmax(logits, dim=-1)
+            pi = torch.softmax(logits + action_masks_ * 10, dim=-1)
+            logpi = torch.log_softmax(logits + action_masks_ * 10, dim=-1)
             
-            pi = pi * action_masks
-            pi = pi / (1e-20 + pi.sum(dim=-1, keepdim=True))
-            
-            logpi = torch.log(pi + 1e-20) * action_masks
+            # pi = pi * action_masks
+            # pi = pi / (1e-20 + pi.sum(dim=-1, keepdim=True))
+            # logpi = torch.log(pi + 1e-20) * action_masks
 
             entropy = - torch.sum(pi * logpi, dim=-1)
+
+            q_with_penalty_for_invalid_action =  q1.detach() + action_masks_  * 8 # punish 8,000 points for invalid action
                         
-            loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1.detach() * pi, dim=-1)
+            loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q_with_penalty_for_invalid_action * pi, dim=-1)
             loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old.detach()))
 
             # debug
@@ -210,7 +212,7 @@ class RLMahjong(nn.Module):
             rnd_idx = np.random.randint(0, int(pi.shape[0]))
             pi_np = pi[rnd_idx].detach().cpu().numpy().reshape([-1])
 
-            if np.random.rand() < 0.01 or pi_np[49] > 0:  # contains ron
+            if np.random.rand() < 0.01 or pi_np[49] > 0.1:  # contains ron
                 print("----------- 抽查 ------------")
                 for idx in np.argwhere(pi_np):
                     print(action_v2_to_human_chinese[int(idx)] + " policy prob : %3.3f" % (pi_np[int(idx)]) + "; logit : %3.3f" % (logits[rnd_idx, int(idx)].detach().cpu().numpy()))

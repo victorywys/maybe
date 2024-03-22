@@ -70,7 +70,8 @@ class Statistics():
                 self.total_agali += 1
                 loser = result.loser[0]
                 for i in range(4):
-                    if (pid := (loser + i) % 4) in result.results:
+                    pid = (loser + i) % 4
+                    if pid in result.results:
                         first_ron = pid
                         break
                 if first_ron == player_id: # 头跳有场供

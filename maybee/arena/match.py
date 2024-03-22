@@ -1,4 +1,8 @@
-from typing import List, Literal
+try:
+    from typing import List, Literal
+except:
+    from typing_extensions import List, Literal
+
 from dataclasses import dataclass
 import random
 

@@ -63,6 +63,7 @@ class RLConfig(PythonConfig):
     actor_training_offset: int = 2000  # how many steps of value training before policy training
     lr_value: float = 3e-5
     lr_actor: float = 3e-5
+    random_mps_change: int = 0
 
     # Discrete SAC (Zhou et al.)
     lr_alpha: float = 3e-4

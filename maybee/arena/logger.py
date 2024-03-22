@@ -1,4 +1,7 @@
-from typing import List
+try:
+    from typing import List
+except:
+    from typing_extensions import List
 
 import json
 import pymahjong as pm
@@ -284,7 +287,8 @@ class TenhouJsonLogger():
             loser = result.loser[0]
             first_ron = True
             for i in range(4):
-                if (player_id := (loser + i) % 4) in result.results:
+                player_id = (loser + i) % 4
+                if player_id in result.results:
                     score_change = [0, 0, 0, 0]
                     winner = player_id
                     if first_ron:
