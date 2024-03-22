@@ -162,9 +162,18 @@ class RLMahjong(nn.Module):
                 else:
                     y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * torch.minimum(
                         torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1), torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1))
-                    
-            loss_c_1 = torch.mean(self.huber_loss(q1[np.arange(rewards.shape[0]), actions], y.detach()))
-            loss_c_2 = torch.mean(self.huber_loss(q2[np.arange(rewards.shape[0]), actions], y.detach()))
+
+                y = y + self.log_alpha.detach().exp() * torch.cat(
+                    [entropy_old[1:], torch.zeros_like(entropy_old[:1])], dim=0)  # y - alpha * log(pi(a_{t+1}|s_{t+1}))
+            
+            # idx = torch.argwhere(y < -5)
+            # print("target", y[idx].detach().cpu().numpy())
+            # print("q1", q1[idx, actions[idx]].detach().cpu().numpy())
+
+            one_hot_actions = nn.functional.one_hot(actions.to(torch.int64), num_classes=q1.shape[-1]) # convert actions to one-hot
+
+            loss_c_1 = torch.mean(self.huber_loss(torch.sum(q1 * one_hot_actions, dim=-1), y.detach()))
+            loss_c_2 = torch.mean(self.huber_loss(torch.sum(q2 * one_hot_actions, dim=-1), y.detach()))
             loss_c = loss_c_1 + loss_c_2
 
             # debug
@@ -181,7 +190,7 @@ class RLMahjong(nn.Module):
             pi = torch.softmax(logits, dim=-1)
             
             pi = pi * action_masks
-            pi = pi / (1e-6 + pi.sum(dim=-1, keepdim=True))
+            pi = pi / (1e-20 + pi.sum(dim=-1, keepdim=True))
             
             logpi = torch.log(pi + 1e-20) * action_masks
 
@@ -197,18 +206,21 @@ class RLMahjong(nn.Module):
             # print("entropy : %3.3f" % (entropy.detach().cpu().numpy().mean()))
             # print("log_alpha : %3.3f" % (self.log_alpha.detach().cpu().numpy()))
             # print("alpha : %3.3f" % (self.log_alpha.detach().exp().cpu().numpy()))
+            
+            rnd_idx = np.random.randint(0, int(pi.shape[0]))
+            pi_np = pi[rnd_idx].detach().cpu().numpy().reshape([-1])
 
-            if np.random.rand() < 0.02:
+            if np.random.rand() < 0.01 or pi_np[49] > 0:  # contains ron
                 print("----------- 抽查 ------------")
-                rnd_idx = np.random.randint(0, int(pi.shape[0]))
-                pi_np = pi[rnd_idx].detach().cpu().numpy().reshape([-1])
                 for idx in np.argwhere(pi_np):
-                    print(action_v2_to_human_chinese[int(idx)] + " policy prob : %3.3f" % (pi_np[int(idx)]))
+                    print(action_v2_to_human_chinese[int(idx)] + " policy prob : %3.3f" % (pi_np[int(idx)]) + "; logit : %3.3f" % (logits[rnd_idx, int(idx)].detach().cpu().numpy()))
                 print("alpha = {}".format(self.log_alpha.detach().exp().cpu().numpy()))
                 print("entropy = %3.3f" % (entropy.detach().cpu().numpy().mean()))
                 print("entropy_old = %3.3f" % (entropy_old.detach().cpu().numpy().mean()))
 
-            loss_alpha = - self.log_alpha * torch.mean((self.config.target_entropy - entropy.detach()))
+            eps = torch.tensor(self.config.policy_epsilon, dtype=torch.float32).to(self.device)
+            target_entropy = - (1 - eps * n_valid_actions) * torch.log(1 - eps * n_valid_actions) - n_valid_actions * eps * torch.log(eps)
+            loss_alpha = - self.log_alpha * torch.mean((target_entropy - entropy.detach()))
             loss_a = loss_a + loss_alpha
 
         # -------- update value network ------------
@@ -216,7 +228,7 @@ class RLMahjong(nn.Module):
             q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
             with torch.no_grad():
                 q_tar = self.target_value_network(self_infos, others_infos, records, global_infos)
-                pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p, dim=-1) 
+                pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_, dim=-1) 
                 pi = pi / pi.sum(dim=-1, keepdim=True)
                 q_grape, adv = self.grape.compute_targets(q.detach(), q_tar.detach(), pi, actions, rewards, policy_probs, dones)
             

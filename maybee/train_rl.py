@@ -67,8 +67,8 @@ class RLConfig(PythonConfig):
     # Discrete SAC (Zhou et al.)
     lr_alpha: float = 3e-4
     clip_q_epsilon: float = 1.0
-    target_entropy: float = 0.7
-    entropy_penalty_beta: float = 0.05
+    policy_epsilon: float = 0.01
+    entropy_penalty_beta: float = 0.1
     use_avg_q: int = 0
 
     # GRAPE

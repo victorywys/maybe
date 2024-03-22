@@ -10,7 +10,7 @@ agent:
 runtime:
   seed: 42
   # save_interval: 100
-  output_dir: "./output/rl_player_20240321"
+  output_dir: "./output/rl_player_20240322"
   checkpoint_dir: "./output/rl_player/checkpoints"
   debug: False
 

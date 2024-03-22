@@ -103,7 +103,7 @@ class MajEncV2ReplayBuffer:
         self.tail = (self.tail + 1) % self.max_num_seq
         self.size = min(self.size + 1, self.max_num_seq)
 
-    def sample_contiguous_batch(self, num_seq=32, random_mps_change=True):
+    def sample_contiguous_batch(self, num_seq=32, random_mps_change=False):
         # sample num_seq episodes, each episode is a contiguous sequence, concatenate them to a batch
         sampled_episodes = torch.from_numpy(np.random.choice(self.size, [num_seq])).to(torch.int64)
 
