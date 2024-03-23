@@ -1,0 +1,53 @@
+description: Maybee
+
+environment:
+  image: frostofwinter/py37maybee:latest
+  registry: docker.io # any public registry can be specified here
+
+target:
+  service: singularity
+  # name: msrresrchvc    # more GPUs
+  name: msroctovc   # less GPUs
+  # # vc: resrchvc
+code:
+  local_dir: $CONFIG_DIR  
+
+# data:
+#   data upload is not required for this example
+
+search:
+  job_template:
+    # you may use {random_string:s} to avoid job name collisions
+    # {auto:3s} generates lr_0.00000_mom_0.5, .. etc
+    # {auto:2s} generates lr_0.00000_mo_0.5, .. etc
+    name: search_{auto:3s}
+    sku: 16G1-V100
+    command:
+    - python train_rl_aml.py config/onlineRL.yaml --algorithm dsac --target_entropy {te} --use_avg_q {avq} --entropy_penalty_beta {epb} --random_mps_change {mps}
+    
+    submit_args: &retry_args
+      max_attempts: 2
+      max_run_duration_seconds: 600000  # 7 days
+    
+  type: grid
+  sampling: grid
+  max_trials: 512
+  parallel_trials: 512
+
+  params: 
+    - name: epb
+      spec: discrete
+      values: [0.01, 0.1, 0.3, 1.0]
+
+    - name: mps
+      spec: discrete
+      values: [0]
+
+    - name: te
+      spec: discrete
+      values: [0.2, 0.5, 0.7, 1.0]
+
+    - name: avq
+      spec: discrete
+      values: [0, 1]
+    
