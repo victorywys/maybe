@@ -66,5 +66,7 @@ class QNetwork(nn.Module):
         # Q = V(s) + A(s,a) - mean(A(s,a'))
         q_values = value + (advantages - advantages.mean(dim=1, keepdim=True))
 
+        # q_values = self.q_net(y)
+
         return q_values
 

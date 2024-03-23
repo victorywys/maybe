@@ -15,7 +15,7 @@ from network import NETWORK
 from model import MODEL
 from pymahjong import MahjongEnv
 from arena.logger import TenhouJsonLogger
-from arena.common import render_global_info, tile_to_tenhou, get_base_tile
+from arena.common import render_global_info, tile_to_tenhou, get_base_tile, action_v2_to_human_chinese
 from dataclasses import field
 
 logger = setup_logger("logger")
@@ -63,12 +63,13 @@ class RLConfig(PythonConfig):
     actor_training_offset: int = 2000  # how many steps of value training before policy training
     lr_value: float = 3e-5
     lr_actor: float = 3e-5
-    random_mps_change: int = 0
+    random_mps_change: int = 1
 
-    # Discrete SAC (Zhou et al.)
+    # Discrete SAC 
     lr_alpha: float = 3e-4
     clip_q_epsilon: float = 1.0
-    policy_epsilon: float = 0.01
+    # policy_epsilon: float = 0.01
+    target_entropy: float = 0.7
     entropy_penalty_beta: float = 0.1
     use_avg_q: int = 0
 
@@ -82,6 +83,16 @@ class RLConfig(PythonConfig):
 if __name__ == "__main__":
 
     config = RLConfig.fromcli()
+
+    if config.runtime.debug:
+        print_log("Debug mode", logger=logger)
+        config.train_start = 100
+        config.batch_seq_num = 20
+        config.actor_training_offset = 10000
+        config.buffer_size = 1000
+        config.lr_value = 1e-4
+        config.lr_actor = 1e-5
+        
 
     setup_experiment(config.runtime)
     print_config(config)
@@ -178,6 +189,13 @@ if __name__ == "__main__":
                     for i in range(1, 4): # oracle information (others' hands)
                         oin[:, (i - 1) * 18 : i * 18] = np.array(te.self_infos[(curr_player_id + i) % 4]).reshape([18, 34]).swapaxes(0, 1)
                     oin_array[step] = oin
+
+                    # print(np.array(action_v2_to_human_chinese)[np.argwhere(oin[:, 0])].flatten())
+                    # print(np.array(action_v2_to_human_chinese)[np.argwhere(oin[:, 18])].flatten())
+                    # print(np.array(action_v2_to_human_chinese)[np.argwhere(oin[:, 36])].flatten())
+
+
+
                     gin_array[step] = gin
                     rcd_array[step][1 : rcd.shape[0] + 1] = rcd  # with start token
                     actions[step] = a
@@ -241,8 +259,10 @@ if __name__ == "__main__":
                 print("Game {}, payoffs: {}".format(game, payoffs))
 
             th_logger.end_game(env.t, te)
-            # print(th_logger.dump_game())
-            # print()
+
+            if game % 200 == 0:
+                print_log("game {}".format(game), logger=logger) 
+                print_log(th_logger.dump_urls(), logger=logger)
 
             for i, p in enumerate(players):
                 p.update_stats(env.t, i)
