@@ -118,7 +118,6 @@ class RLMahjong(nn.Module):
         self.update_times = 0
 
         self.mse_loss = nn.MSELoss()
-        self.huber_loss = nn.HuberLoss(delta=self.config.clip_q_epsilon)
         self.device = torch.device(device)
         self.to(device=self.device)
 
@@ -145,7 +144,7 @@ class RLMahjong(nn.Module):
 
         policy_normed = policy_probs # already normed
         entropy_old = - torch.sum(policy_normed * torch.log(policy_normed + 1e-9), dim=-1).detach()
-        policy_normed_a = torch.sum(policy_normed * one_hot_actions, dim=-1).clamp(1e-6, torch.inf)
+        policy_normed_a = torch.sum(policy_normed * one_hot_actions, dim=-1).clamp(1e-6, 1)
 
         action_masks_ = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) # [-1, -1, 0, 0, -1, -1, ....]
         action_masks_p_ = torch.cat([action_masks_, torch.zeros_like(action_masks_[:1])], dim=0)
@@ -159,7 +158,6 @@ class RLMahjong(nn.Module):
                 q_tar_tp1_1 = self.target_value_network_1(self_infos, others_infos, records, global_infos)[1:]
                 q_tar_tp1_2 = self.target_value_network_2(self_infos, others_infos, records, global_infos)[1:]
                 
-                # rewards = rewards.clamp(- torch.inf, 0)
                 pi_tp1 = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_ * 10000, dim=-1)[1:]
                 if self.config.use_avg_q:
                     y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * ((
@@ -172,7 +170,7 @@ class RLMahjong(nn.Module):
 
                 # y - alpha * log(pi(a_{t+1}|s_{t+1}))
                     
-            if np.random.rand() < 0.1:
+            if np.random.rand() < 0.02:
                 idx = torch.argwhere(y < -5)
                 print("target", y[idx].detach().cpu().numpy())
                 print("q1", q1[idx, actions[idx]].detach().cpu().numpy())
@@ -253,7 +251,7 @@ class RLMahjong(nn.Module):
             q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
             with torch.no_grad():
                 q_tar = self.target_value_network(self_infos, others_infos, records, global_infos)
-                pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_, dim=-1) 
+                pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_ * 10000, dim=-1) 
                 pi = pi / pi.sum(dim=-1, keepdim=True)
                 q_grape, adv = self.grape.compute_targets(q.detach(), q_tar.detach(), pi, actions, rewards, policy_probs, dones)
             
@@ -277,7 +275,7 @@ class RLMahjong(nn.Module):
 
             one_hot_action = nn.functional.one_hot(actions.to(torch.int64), num_classes=pi.shape[-1])  # convert actions to one-hot
 
-            r =  torch.sum((pi / policy_probs.clamp(1e-3, torch.inf)) * one_hot_action, dim=-1)
+            r =  torch.sum((pi / policy_probs.clamp(1e-3, 1)) * one_hot_action, dim=-1)
             adv_a = torch.sum(adv.detach() * one_hot_action, dim=-1)
             obj_pi = r * adv_a
 
@@ -348,13 +346,20 @@ class RLMahjong(nn.Module):
 
         logits = self.actor_network(self_info, record, global_info)
         action_mask_ = torch.zeros_like(action_mask) - (action_mask < 0.5).to(torch.float) # [-1, -1, 0, 0, -1, -1, ....]
-        policy_prob = (torch.softmax(logits[0] / temp + action_mask_ * 10000, dim=-1).reshape([-1])).cpu().detach().numpy()
+        policy_prob = (torch.softmax(logits[0] / temp + action_mask_ * 1e9, dim=-1).reshape([-1])).cpu().detach().numpy()
 
         a = np.random.choice(54, p=policy_prob/policy_prob.sum())
 
         return a, policy_prob
-
-        
+    
+    def _save(self, savepath):
+        torch.save(
+            {
+                "model": self.state_dict(),
+                "update_times": self.update_times
+            },
+            savepath)
+    
     def _checkpoint(self, checkpoint_dir=None):
         torch.save(
             {
