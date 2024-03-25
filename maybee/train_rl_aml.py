@@ -6,7 +6,7 @@ import os
 import traceback
 import logging
 
-# from utilsd import setup_experiment, get_output_dir, get_checkpoint_dir
+from utilsd import setup_experiment, get_output_dir, get_checkpoint_dir
 from utilsd.experiment import print_config
 # from utilsd.logging import print_log, setup_logger
 from utilsd.config import configclass, RegistryConfig, PythonConfig, ClassConfig, RuntimeConfig
@@ -17,7 +17,9 @@ from model import MODEL
 from pymahjong import MahjongEnv
 from arena.logger import TenhouJsonLogger
 from arena.common import render_global_info, tile_to_tenhou, get_base_tile, action_v2_to_human_chinese
-# from dataclasses import field
+from dataclasses import field
+
+# import scipy.io as sio
 
 logging.basicConfig(level=logging.INFO)
 
@@ -50,21 +52,21 @@ class RLConfig(PythonConfig):
     player4: RegistryConfig[PLAYER]
     value_network: RegistryConfig[NETWORK]
     agent: RegistryConfig[MODEL]
-    # runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     # online learning setting
-    save_interval: int = 20000
-    stat_interval: int = 1000
+    save_interval: int = 10000
+    stat_interval: int = 4000
     resume: bool = False  # whether to resume from checkpoint
 
     # RL general
     algorithm: str = "dsac"  # dsac, grape
     gamma: float = 0.999
-    train_start: int = 5000
-    buffer_size: int = 5000  # for 16G GPU memory
-    batch_seq_num: int = 10  # for 16G GPU memory
+    train_start: int = 4000
+    buffer_size: int = 10000  # for 16G GPU memory
+    batch_seq_num: int = 40  # for 16G GPU memory
     grad_step_num_per_game: int = 1
-    actor_training_offset: int = 5000  # how many steps of value training before policy training
+    actor_training_offset: int = 4000  # how many steps of value training before policy training
     lr_value: float = 3e-5
     lr_actor: float = 1e-5
     random_mps_change: int = 1
@@ -87,7 +89,7 @@ if __name__ == "__main__":
 
     config = RLConfig.fromcli()
 
-    # setup_experiment(config.runtime)
+    setup_experiment(config.runtime)
     print_config(config)
 
     if os.path.exists(savepath):
@@ -113,13 +115,12 @@ if __name__ == "__main__":
     record_buffer = MajEncV2ReplayBuffer(max_num_seq=config.buffer_size, device='cuda') 
 
     env = MahjongEnv()
-    num_games = int(1e6)
+    num_games = int(35000)
 
     start_time = time.time()
     game = 0
     success_games = 0
-    for player in players:
-        player.reset_stats()
+
 
     winds = ["east", "south", "west", "north"]
 
@@ -130,19 +131,10 @@ if __name__ == "__main__":
             env.reset(oya=game % 4, game_wind=winds[game % 2], kyoutaku=0, honba=0)
             # env.reset(oya=2, game_wind='south', debug_mode=1)
 
-            th_logger = TenhouJsonLogger()
-            th_logger.init_match(
-                player_names=[p.name for p in players],
-                game_desc1="Test play with random players",
-                rule_desc="1 game test",
-            )
-
             # encoder
             te = pm.TableEncoder(env.t)
             te.init()
             te.update()
-
-            th_logger.start_game(env.t, te)
 
             sin_array = np.zeros([51, 34, 18], dtype=bool)
             oin_array = np.zeros([51, 34, 54], dtype=bool)
@@ -153,7 +145,7 @@ if __name__ == "__main__":
             policy_probs = np.zeros([50, 54], dtype=np.float32)
             rs = np.zeros([50], dtype=np.float32)
             dones = np.zeros([50], dtype=np.float32)
-            scores=[25000, 25000, 25000, 25000]
+            scores = [25000, 25000, 25000, 25000]
             
             step = 0
 
@@ -240,12 +232,6 @@ if __name__ == "__main__":
             if is_prime(game):
                 print("Game {}, payoffs: {}".format(game, payoffs))
 
-            th_logger.end_game(env.t, te)
-
-            if game % 200 == 0:
-                logging.info("game {}".format(game)) 
-                logging.info(th_logger.dump_urls())
-            
             for i, p in enumerate(players):
                 p.update_stats(env.t, i)
 
@@ -274,10 +260,72 @@ if __name__ == "__main__":
             continue
         
         if game % config.stat_interval == 0:
+            
+            for p in players:
+                p.reset_stats()
+            
+            for game_test in range(config.stat_interval):
+
+                try:
+                    env.reset(oya=game_test % 4, game_wind=winds[game_test % 2], kyoutaku=0, honba=0)
+                    
+                    # encoder
+                    te = pm.TableEncoder(env.t)
+                    te.init()
+                    te.update()
+
+                    if game_test % 200 == 0:
+                        th_logger = TenhouJsonLogger()
+                        th_logger.init_match(
+                            player_names=[p.name for p in players],
+                            game_desc1="Test play with SL players",
+                            rule_desc="1 game test",
+                        )
+                        th_logger.start_game(env.t, te)
+                    
+                    while not env.is_over():
+                        curr_player_id = env.get_curr_player_id()
+                        valid_actions_mask = env.get_valid_actions(nhot=True)
+                        obs = np.array(te.self_infos[curr_player_id]).reshape([18, 34]).swapaxes(0, 1)
+                        rcd = np.array(te.records[curr_player_id])
+                        
+                        if rcd.ndim == 1:
+                            rcd = np.zeros([0, 55], dtype=bool)
+                        
+                        gin = np.array(te.global_infos[curr_player_id])
+
+                        # --------- make decision -------------                
+
+                        if curr_player_id == 0:   # only record player 0 (the RL agent)
+                            a, policy_prob = agent.select_action(obs, rcd, gin, valid_actions_mask, temp=0.01) # greedy                        
+                        else:
+                            a = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask)  # AI player does padding interiorly 
+                                                
+                        env.step(curr_player_id, a)
+                        te.update()
+                    
+                    for i, p in enumerate(players):
+                        p.update_stats(env.t, i)
+                    
+                    if game_test % 200 == 0:
+                        th_logger.end_game(env.t, te)
+                        logging.info("game {}".format(game_test)) 
+                        logging.info(th_logger.dump_urls())
+                
+                except Exception as inst:
+                    try:
+                        print("-------------- execption in game {} -------------------------".format(game_test))
+                        print('Exception: ', inst)
+                        print("----------------- Traceback ---------------------------------")
+                        traceback.print_exc()
+                    except:
+                        pass
+                    
+                # end for
+                
             for i, p in enumerate(players[:1]):
                 logging.info("Player {} stats: \n{}".format(i, p.dump_stats()))
-                p.reset_stats()
-
+            
         if game % config.save_interval == 0:
 
             logging.info("==================================================================================")
@@ -286,6 +334,6 @@ if __name__ == "__main__":
             logging.info("Success games: {}".format(success_games))
             
             # save model
-            agent._checkpoint(os.path.join(savepath, "game_{}.pth".format(game)))
+            agent._save(os.path.join(savepath, "rl_game_{}.pth".format(game)))
             
             logging.info("==================================================================================")

@@ -114,7 +114,7 @@ class MajEncV2ReplayBuffer:
         
         batch_size = torch.sum(length_b).cpu().item()
 
-        actions_b =  torch.cat([tmp[:n] for (tmp, n) in zip(self.actions[sampled_episodes], length_b)], dim=0)
+        actions_b =  torch.cat([tmp[:n] for (tmp, n) in zip(self.actions[sampled_episodes], length_b)], dim=0).to(torch.int64)
         action_masks_b = torch.cat([tmp[:n] for (tmp, n) in zip(self.action_masks[sampled_episodes], length_b)], dim=0)
         policy_prob_b = torch.cat([tmp[:n] for (tmp, n) in zip(self.policy_prob[sampled_episodes], length_b)], dim=0)
         rewards_b = torch.cat([tmp[:n] for (tmp, n) in zip(self.rewards[sampled_episodes], length_b)], dim=0)
