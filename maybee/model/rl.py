@@ -170,11 +170,12 @@ class RLMahjong(nn.Module):
 
                 # y - alpha * log(pi(a_{t+1}|s_{t+1}))
                     
-            if np.random.rand() < 0.02:
-                idx = torch.argwhere(y < -5)
-                print("target", y[idx].detach().cpu().numpy())
-                print("q1", q1[idx, actions[idx]].detach().cpu().numpy())
-                print("policy_normed_a", policy_normed_a[idx].detach().cpu().numpy())
+            if np.random.rand() < 0.01:
+                idx = torch.argwhere((y < -5).to(torch.int) + (y > 5).to(torch.int))
+                print("target           ", np.array2string(y[idx].detach().cpu().numpy().flatten(), separator=', ', precision=1))
+                print("q1_a             ", np.array2string(q1[idx, actions[idx]].detach().cpu().numpy().flatten(), separator=', ', precision=1))
+                print("q2_a             ", np.array2string(torch.sum(q2[idx] * one_hot_actions[idx], dim=-1).detach().cpu().numpy().flatten(), separator=', ', precision=1))
+                print("policy_normed_a  ", np.array2string(policy_normed_a[idx].detach().cpu().numpy().flatten(), separator=', ', precision=1))
 
             loss_c_1 = torch.mean(self.mse_loss(torch.sum(q1 * one_hot_actions, dim=-1), y.detach()))
             loss_c_2 = torch.mean(self.mse_loss(torch.sum(q2 * one_hot_actions, dim=-1), y.detach()))
@@ -210,9 +211,9 @@ class RLMahjong(nn.Module):
 
             entropy = - torch.sum(pi_masked * logpi_masked, dim=-1)
 
-            # q_with_penalty_for_invalid_action =  q1.detach() * action_masks_ * 16 # punish 16,000 points for invalid action
-                        
-            loss_a = - self.log_alpha.detach().exp() * entropy - q1[torch.arange(0, q1.shape[0]), a_sampled].detach() * logpi_masked[torch.arange(0, q1.shape[0]), a_sampled] # pass-response keep its value for debug
+            # q_with_penalty_for_invalid_action =  q1.detach() - action_masks_ * 16 # punish 16,000 points for invalid action            
+
+            loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1 * pi_masked, dim=-1)
             loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old.detach()))
 
             # debug

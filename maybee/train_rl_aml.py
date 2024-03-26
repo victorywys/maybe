@@ -274,7 +274,7 @@ if __name__ == "__main__":
                     te.init()
                     te.update()
 
-                    if game_test % 200 == 0:
+                    if game_test % 255 == 0:
                         th_logger = TenhouJsonLogger()
                         th_logger.init_match(
                             player_names=[p.name for p in players],
@@ -307,7 +307,7 @@ if __name__ == "__main__":
                     for i, p in enumerate(players):
                         p.update_stats(env.t, i)
                     
-                    if game_test % 200 == 0:
+                    if game_test % 255 == 0:
                         th_logger.end_game(env.t, te)
                         logging.info("game {}".format(game_test)) 
                         logging.info(th_logger.dump_urls())

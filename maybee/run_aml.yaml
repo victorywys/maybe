@@ -32,7 +32,7 @@ search:
     name: search_{auto:3s}
     sku: 16G1
     command:
-    - python train_rl_aml.py config/onlineRLamlt.yaml --algorithm dsac --target_entropy {te} --use_avg_q {avq} --entropy_penalty_beta {epb} --random_mps_change {mps}
+    - python train_rl_aml.py config/onlineRLamlt.yaml --algorithm dsac --target_entropy {te} --use_avg_q {avq} --entropy_penalty_beta {epb} --random_mps_change {mps} --grad_step_num_per_game {utd} --actor_training_offset {ofs}
     # - python train_rl_aml.py config/onlineRLamlt.yaml --algorithm grape --alpha_grape {alp} --lambd_grape {lmd} --coef_entropy {coe} --random_mps_change {mps}
 
     submit_args: &retry_args
@@ -48,10 +48,18 @@ search:
     - name: mps
       spec: discrete
       values: [0, 1]
+    
+    - name: utd
+      spec: discrete
+      values: [1]
+
+    - name: ofs
+      spec: discrete
+      values: [0, 4000]
 
     - name: epb
       spec: discrete
-      values: [0.1, 0.3, 1, 3]
+      values: [0.01, 0.1, 0.5, 4]
 
     - name: te
       spec: discrete
