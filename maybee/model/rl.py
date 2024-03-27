@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard.writer  import SummaryWriter
 from torch.utils.data import DataLoader
+
 from utilsd import use_cuda
 from utilsd.config import PythonConfig
 
@@ -22,6 +23,8 @@ import os
 from copy import deepcopy
 
 from arena.common import *
+
+INFINITY = 1e20
 
 class GRAPE:
     """
@@ -103,7 +106,7 @@ class RLMahjong(nn.Module):
             self.target_value_network = deepcopy(self.value_network)
 
         elif self.config.algorithm == "dsac":
-            self.log_alpha = nn.Parameter(torch.tensor(-3, requires_grad=True, dtype=torch.float32))
+            self.log_alpha = nn.Parameter(torch.tensor(0, requires_grad=True, dtype=torch.float32))
             self.optimizer_alpha = torch.optim.Adam([self.log_alpha], lr=config.lr_alpha)
             self.value_network_1 = config.value_network.build()
             self.value_network_2 = config.value_network.build()
@@ -150,28 +153,32 @@ class RLMahjong(nn.Module):
         action_masks_p_ = torch.cat([action_masks_, torch.zeros_like(action_masks_[:1])], dim=0)
 
         if self.algorithm == "dsac":
-            
+
             # -------- critic learning ----------
             q1 = self.value_network_1(self_infos, others_infos, records, global_infos)[:-1] # [batch_size, action_dim]
             q2 = self.value_network_2(self_infos, others_infos, records, global_infos)[:-1] # [batch_size, action_dim]
             with torch.no_grad():
                 q_tar_tp1_1 = self.target_value_network_1(self_infos, others_infos, records, global_infos)[1:]
                 q_tar_tp1_2 = self.target_value_network_2(self_infos, others_infos, records, global_infos)[1:]
+
+                logits_p = self.actor_network(self_infos, records, global_infos).detach()
+                pi_tp1 = torch.softmax(logits_p + action_masks_p_ * INFINITY, dim=-1)[1:]
+                logpi_tp1 = torch.log_softmax(logits_p + action_masks_p_ * INFINITY, dim=-1)[1:]
+                entropy_tp1 = - torch.sum(pi_tp1 * logpi_tp1, dim=-1)
                 
-                pi_tp1 = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_ * 10000, dim=-1)[1:]
                 if self.config.use_avg_q:
                     y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * ((
-                        torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1) + torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) / 2 - self.log_alpha.detach().exp() * torch.log(torch.cat(
-                    [policy_normed_a[1:], torch.ones_like(policy_normed_a[:1])], dim=0)))
+                        torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1) + torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) / 2 + self.log_alpha.detach().exp() * entropy_tp1)
                 else:
                     y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * (torch.minimum(
-                        torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1), torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) - self.log_alpha.detach().exp() * torch.log(torch.cat(
-                    [policy_normed_a[1:], torch.ones_like(policy_normed_a[:1])], dim=0)))
+                        torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1), torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) + self.log_alpha.detach().exp() * entropy_tp1)
 
                 # y - alpha * log(pi(a_{t+1}|s_{t+1}))
-                    
+                
             if np.random.rand() < 0.01:
                 idx = torch.argwhere((y < -5).to(torch.int) + (y > 5).to(torch.int))
+                if len(idx) > 5:
+                    idx = idx[:5]
                 print("target           ", np.array2string(y[idx].detach().cpu().numpy().flatten(), separator=', ', precision=1))
                 print("q1_a             ", np.array2string(q1[idx, actions[idx]].detach().cpu().numpy().flatten(), separator=', ', precision=1))
                 print("q2_a             ", np.array2string(torch.sum(q2[idx] * one_hot_actions[idx], dim=-1).detach().cpu().numpy().flatten(), separator=', ', precision=1))
@@ -199,11 +206,11 @@ class RLMahjong(nn.Module):
             
             # 方案2
             pi = torch.softmax(logits, dim=-1)
-            pi_masked = torch.softmax(logits + action_masks_ * 10000, dim=-1)
-            logpi_masked = torch.log_softmax(logits + action_masks_ * 10000, dim=-1)
+            pi_masked = torch.softmax(logits + action_masks_ * INFINITY, dim=-1)
+            logpi_masked = torch.log_softmax(logits + action_masks_ * INFINITY, dim=-1)
             # pi_masked = pi_masked / (1e-20 + pi_masked.sum(dim=-1, keepdim=True))
             # logpi = torch.log(pi + 1e-20) * action_masks
-            a_sampled = torch.distributions.Categorical(pi_masked).sample().detach()
+            # a_sampled = torch.distributions.Categorical(pi_masked).sample().detach()
 
             # 方案3
             # pi = torch.softmax(logits, dim=-1)
@@ -211,18 +218,10 @@ class RLMahjong(nn.Module):
 
             entropy = - torch.sum(pi_masked * logpi_masked, dim=-1)
 
-            # q_with_penalty_for_invalid_action =  q1.detach() - action_masks_ * 16 # punish 16,000 points for invalid action            
-
+            # q_with_penalty_for_invalid_action =  q1.detach() * action_masks_ * 16 # punish 16,000 points for invalid action
+            
             loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1 * pi_masked, dim=-1)
             loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old.detach()))
-
-            # debug
-            # print("pi : %3.3f" % (pi.detach().cpu().numpy().mean()))
-            # print("logpi : %3.3f" % (logpi.detach().cpu().numpy().mean()))
-            # print("loss_a : %3.3f" % (loss_a.detach().cpu().numpy()))
-            # print("entropy : %3.3f" % (entropy.detach().cpu().numpy().mean()))
-            # print("log_alpha : %3.3f" % (self.log_alpha.detach().cpu().numpy()))
-            # print("alpha : %3.3f" % (self.log_alpha.detach().exp().cpu().numpy()))
             
             rnd_idx = np.random.randint(0, int(pi.shape[0]))
             pi_np = pi_masked[rnd_idx].detach().cpu().numpy().reshape([-1])
@@ -252,7 +251,7 @@ class RLMahjong(nn.Module):
             q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
             with torch.no_grad():
                 q_tar = self.target_value_network(self_infos, others_infos, records, global_infos)
-                pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_ * 10000, dim=-1) 
+                pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_ * INFINITY, dim=-1) 
                 pi = pi / pi.sum(dim=-1, keepdim=True)
                 q_grape, adv = self.grape.compute_targets(q.detach(), q_tar.detach(), pi, actions, rewards, policy_probs, dones)
             
@@ -347,7 +346,7 @@ class RLMahjong(nn.Module):
 
         logits = self.actor_network(self_info, record, global_info)
         action_mask_ = torch.zeros_like(action_mask) - (action_mask < 0.5).to(torch.float) # [-1, -1, 0, 0, -1, -1, ....]
-        policy_prob = (torch.softmax(logits[0] / temp + action_mask_ * 1e9, dim=-1).reshape([-1])).cpu().detach().numpy()
+        policy_prob = (torch.softmax(logits[0] / temp + action_mask_ * INFINITY, dim=-1).reshape([-1])).cpu().detach().numpy()
 
         a = np.random.choice(54, p=policy_prob/policy_prob.sum())
 
