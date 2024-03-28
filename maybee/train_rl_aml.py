@@ -56,26 +56,31 @@ class RLConfig(PythonConfig):
 
     # online learning setting
     save_interval: int = 10000
-    stat_interval: int = 4000
+    stat_interval: int = 5500
     resume: bool = False  # whether to resume from checkpoint
 
     # RL general
+    num_games: int = 100000
     algorithm: str = "dsac"  # dsac, grape
     gamma: float = 0.999
-    train_start: int = 4000
     buffer_size: int = 10000  # for 16G GPU memory
     batch_seq_num: int = 40  # for 16G GPU memory
-    grad_step_num_per_game: int = 1
-    actor_training_offset: int = 4000  # how many steps of value training before policy training
-    lr_value: float = 3e-5
+    grad_step_num_v_per_epoch: int = 5000
+    grad_step_num_a_per_game: int = 1
+    lr_value: float = 2e-4
     lr_actor: float = 1e-5
     random_mps_change: int = 1
+
+    action_mask_mode: int = 1
+
+    epoch_reset: int = 2  # Resetting the last layer of Q network
 
     # Discrete SAC 
     lr_alpha: float = 3e-4
     clip_q_epsilon: float = 1.0
-    target_entropy: float = 0.7
-    entropy_penalty_beta: float = 0.1    
+    target_entropy: float = 0.7 # for action_mask_mode = 2
+    policy_epsilon: float = 0.02 # for action_mask_mode = 1
+    entropy_penalty_beta: float = 0.1 
     use_avg_q: int = 0
 
     # GRAPE
@@ -115,12 +120,13 @@ if __name__ == "__main__":
     record_buffer = MajEncV2ReplayBuffer(max_num_seq=config.buffer_size, device='cuda') 
 
     env = MahjongEnv()
-    num_games = int(35000)
+    num_games = config.num_games
 
     start_time = time.time()
     game = 0
     success_games = 0
 
+    epoch = 0
 
     winds = ["east", "south", "west", "north"]
 
@@ -239,12 +245,18 @@ if __name__ == "__main__":
             game += 1
 
             # if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
+
+            if game % config.buffer_size == 0:
+                if (epoch + 1) % config.epoch_reset == 0:
+                    agent.reset_q()
+                for _ in range(config.grad_step_num_v_per_epoch):
+                    agent.update(record_buffer, actor_training=False, critic_training=True)
+                epoch += 1
             
-            if game > config.train_start:
-                for _ in range(config.grad_step_num_per_game):
-                    agent.update(record_buffer)
-
-
+            if epoch >= 1:
+                for _ in range(config.grad_step_num_a_per_game):
+                    agent.update(record_buffer, actor_training=True, critic_training=False)
+            
         except Exception as inst:
             
             game += 1
@@ -264,7 +276,7 @@ if __name__ == "__main__":
             for p in players:
                 p.reset_stats()
             
-            for game_test in range(config.stat_interval):
+            for game_test in range(int(config.stat_interval / 2)):
 
                 try:
                     env.reset(oya=game_test % 4, game_wind=winds[game_test % 2], kyoutaku=0, honba=0)

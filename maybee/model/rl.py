@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 import numpy as np
-
+import warnings
 import time
 
 import torch
@@ -106,7 +106,7 @@ class RLMahjong(nn.Module):
             self.target_value_network = deepcopy(self.value_network)
 
         elif self.config.algorithm == "dsac":
-            self.log_alpha = nn.Parameter(torch.tensor(0, requires_grad=True, dtype=torch.float32))
+            self.log_alpha = nn.Parameter(torch.tensor(-3, requires_grad=True, dtype=torch.float32))
             self.optimizer_alpha = torch.optim.Adam([self.log_alpha], lr=config.lr_alpha)
             self.value_network_1 = config.value_network.build()
             self.value_network_2 = config.value_network.build()
@@ -114,9 +114,11 @@ class RLMahjong(nn.Module):
             self.target_value_network_2 = deepcopy(self.value_network_2)
             self.value_network = TwinQNetwork(self.value_network_1, self.value_network_2)
             self.target_value_network = TwinQNetwork(self.target_value_network_1, self.target_value_network_2)
+            for param in self.target_value_network.parameters():
+                param.requires_grad = False
 
         self.optimizer_a = torch.optim.Adam(self.actor_network.parameters(), lr=config.lr_actor)
-        self.optimizer_v = torch.optim.Adam(self.value_network.parameters(), lr=config.lr_value)  # TODO: two Q networks
+        self.optimizer_v = torch.optim.Adam(self.value_network.parameters(), lr=config.lr_value)  
 
         self.update_times = 0
 
@@ -129,7 +131,7 @@ class RLMahjong(nn.Module):
         self.writer = SummaryWriter(log_dir=self.log_dir)
         self.writer.flush()
 
-    def update(self, buffer):
+    def update(self, buffer, actor_training, critic_training):
 
         self.train()
 
@@ -162,8 +164,14 @@ class RLMahjong(nn.Module):
                 q_tar_tp1_2 = self.target_value_network_2(self_infos, others_infos, records, global_infos)[1:]
 
                 logits_p = self.actor_network(self_infos, records, global_infos).detach()
+
                 pi_tp1 = torch.softmax(logits_p + action_masks_p_ * INFINITY, dim=-1)[1:]
                 logpi_tp1 = torch.log_softmax(logits_p + action_masks_p_ * INFINITY, dim=-1)[1:]
+                if self.config.action_mask_mode == 1:
+                    entropy_tp1 = - torch.sum(pi_tp1 * logpi_tp1, dim=-1)
+                elif self.config.action_mask_mode == 2:                
+                    entropy_tp1 = - torch.sum(torch.softmax(logits_p, dim=-1)[1:] * torch.log_softmax(logits_p, dim=-1)[1:], dim=-1)
+                
                 entropy_tp1 = - torch.sum(pi_tp1 * logpi_tp1, dim=-1)
                 
                 if self.config.use_avg_q:
@@ -188,63 +196,50 @@ class RLMahjong(nn.Module):
             loss_c_2 = torch.mean(self.mse_loss(torch.sum(q2 * one_hot_actions, dim=-1), y.detach()))
             loss_c = loss_c_1 + loss_c_2
 
-            # debug
-            # print("loss_c_1 : %3.3f" % (loss_c_1.detach().cpu().numpy()))
-            # print("loss_c_2 : %3.3f" % (loss_c_2.detach().cpu().numpy()))
-            # print("loss_c : %3.3f" % (loss_c.detach().cpu().numpy()))
-            # print("y : %3.3f" % (y.detach().cpu().numpy().mean()))
-            # print("q1 : %3.3f" % (q1.detach().cpu().numpy().mean()))
-            # print("q2 : %3.3f" % (q2.detach().cpu().numpy().mean()))
-            # print("entropy_old : %3.3f" % (entropy_old.detach().cpu().numpy().mean()))
-
             # -------- actor learning ----------
-            logits = self.actor_network(self_infos, records, global_infos)[:-1]
-            
-            # 方案1
-            # pi = torch.softmax(logits + action_masks_ * 10, dim=-1)
-            # logpi = torch.log_softmax(logits + action_masks_ * 10, dim=-1)
-            
-            # 方案2
-            pi = torch.softmax(logits, dim=-1)
-            pi_masked = torch.softmax(logits + action_masks_ * INFINITY, dim=-1)
-            logpi_masked = torch.log_softmax(logits + action_masks_ * INFINITY, dim=-1)
-            # pi_masked = pi_masked / (1e-20 + pi_masked.sum(dim=-1, keepdim=True))
-            # logpi = torch.log(pi + 1e-20) * action_masks
-            # a_sampled = torch.distributions.Categorical(pi_masked).sample().detach()
+            if actor_training:
+                logits = self.actor_network(self_infos, records, global_infos)[:-1]
+                
+                if self.config.action_mask_mode == 1:
+                    # 方案1
+                    pi = torch.softmax(logits + action_masks_ * INFINITY, dim=-1)
+                    logpi = torch.log_softmax(logits + action_masks_ * INFINITY, dim=-1)
+                    entropy = - torch.sum(pi * logpi, dim=-1)
+                    loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1.detach() * pi, dim=-1)
+                    loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old.detach()))
+                
+                elif self.config.action_mask_mode == 2:
+                    # 方案2
+                    pi = torch.softmax(logits, dim=-1)
+                    logpi = torch.log_softmax(logits, dim=-1)
+                    entropy = - torch.sum(pi * logpi, dim=-1)
+                    q_with_penalty_for_invalid_action =  q1.detach() + action_masks_ * 32 # punish 32,000 points for invalid action
+                    loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q_with_penalty_for_invalid_action * pi, dim=-1)
+                    loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old.detach()))
 
-            # 方案3
-            # pi = torch.softmax(logits, dim=-1)
-            # logpi = torch.log_softmax(logits, dim=-1)
+                rnd_idx = np.random.randint(0, int(q1.shape[0]))
+                pi_np = pi[rnd_idx].detach().cpu().numpy().reshape([-1])
 
-            entropy = - torch.sum(pi_masked * logpi_masked, dim=-1)
+                if np.random.rand() < 0.01 or pi_np[49] > 0.1:  # contains ron
+                    print("----------- 抽查 ------------")
+                    for idx in np.argwhere(action_masks[rnd_idx].detach().cpu().numpy()):
+                        print(action_v2_to_human_chinese[int(idx)] + " policy prob : %3.3f" % (pi_np[int(idx)])
+                            + "; logit : %3.3f" % (logits[rnd_idx, int(idx)].detach().cpu().numpy())
+                            + "; Q : %3.3f" % (q1[rnd_idx, int(idx)].detach().cpu().numpy()))
+                        
+                    print("alpha = {}".format(self.log_alpha.detach().exp().cpu().numpy()))
+                    print("entropy = %3.3f" % (entropy.detach().cpu().numpy().mean()))
+                    print("entropy_old = %3.3f" % (entropy_old.detach().cpu().numpy().mean()))
 
-            # q_with_penalty_for_invalid_action =  q1.detach() * action_masks_ * 16 # punish 16,000 points for invalid action
-            
-            loss_a = - self.log_alpha.detach().exp() * entropy - torch.sum(q1 * pi_masked, dim=-1)
-            loss_a = torch.mean(loss_a) + self.config.entropy_penalty_beta * torch.mean(self.mse_loss(entropy, entropy_old.detach()))
-            
-            rnd_idx = np.random.randint(0, int(pi.shape[0]))
-            pi_np = pi_masked[rnd_idx].detach().cpu().numpy().reshape([-1])
-
-            if np.random.rand() < 0.01 or pi_np[49] > 0.1:  # contains ron
-                print("----------- 抽查 ------------")
-                for idx in np.argwhere(action_masks[rnd_idx].detach().cpu().numpy()):
-                    print(action_v2_to_human_chinese[int(idx)] + " policy prob : %3.3f" % (pi_np[int(idx)])
-                           + "; logit : %3.3f" % (logits[rnd_idx, int(idx)].detach().cpu().numpy())
-                           + "; Q : %3.3f" % (q1[rnd_idx, int(idx)].detach().cpu().numpy()))
+                if self.config.action_mask_mode == 1:
+                    eps = torch.tensor(self.config.policy_epsilon, dtype=torch.float32).to(self.device)
+                    target_entropy = - (1 - eps * (n_valid_actions - 1)) * torch.log(
+                        1 - eps * (n_valid_actions - 1)) - (n_valid_actions - 1) * eps * torch.log(eps)
+                elif self.config.action_mask_mode == 2:
+                    target_entropy = self.config.target_entropy
                     
-                print("alpha = {}".format(self.log_alpha.detach().exp().cpu().numpy()))
-                print("entropy = %3.3f" % (entropy.detach().cpu().numpy().mean()))
-                print("entropy_old = %3.3f" % (entropy_old.detach().cpu().numpy().mean()))
-
-            if self.config.target_entropy is not None:
-                target_entropy = self.config.target_entropy
-            else:
-                eps = torch.tensor(self.config.policy_epsilon, dtype=torch.float32).to(self.device)
-                target_entropy = - (1 - eps * (n_valid_actions - 1)) * torch.log(
-                    1 - eps * (n_valid_actions - 1)) - (n_valid_actions - 1) * eps * torch.log(eps)
-            loss_alpha = - self.log_alpha * torch.mean((target_entropy - entropy.detach()))
-            loss_a = loss_a + loss_alpha
+                loss_alpha = - self.log_alpha * torch.mean((target_entropy - entropy.detach()))
+                loss_a = loss_a + loss_alpha
 
         # -------- update value network ------------
         elif self.algorithm == "grape":
@@ -284,33 +279,53 @@ class RLMahjong(nn.Module):
             loss_h = torch.mean(_loss_h)  # entropy loss
 
             loss_a = loss_p + self.config.coef_entropy * loss_h
+
+        # end computing loss
         
         # --------- update model parameters ------------
-        if self.config.actor_training_offset > 0:
-            if self.update_times > self.config.actor_training_offset:
-                loss = loss_c + loss_a
-            else:
-                loss = loss_c
-        else:
-            if self.update_times >= - self.config.actor_training_offset:
-                loss = loss_c + loss_a
-            else:
-                loss = loss_a
-        
-        self.optimizer_a.zero_grad()
-        self.optimizer_v.zero_grad()
-        if self.algorithm == "dsac":
-            self.optimizer_alpha.zero_grad()
-        
-        loss.backward()
-        nn.utils.clip_grad_norm_(self.parameters(), 10)
+        if actor_training and critic_training:
+            self.optimizer_a.zero_grad()
+            self.optimizer_v.zero_grad()
+            if self.algorithm == "dsac":
+                self.optimizer_alpha.zero_grad()
+            (loss_a + loss_c).backward()
+            nn.utils.clip_grad_norm_(self.actor_network.parameters(), 10)
+            nn.utils.clip_grad_norm_(self.value_network.parameters(), 10)
+            if self.algorithm == "dsac":
+                self.optimizer_alpha.step()
+            self.optimizer_a.step()
+            self.optimizer_v.step()
 
-        self.optimizer_a.step()
-        self.optimizer_v.step()
-        if self.algorithm == "dsac":
-            self.optimizer_alpha.step()
+        elif actor_training:
+            self.optimizer_a.zero_grad()
+            loss_a.backward()
+            nn.utils.clip_grad_norm_(self.actor_network.parameters(), 10)
+            self.optimizer_a.step()
+
+        elif critic_training:
+            self.optimizer_v.zero_grad()
+            loss_c.backward()
+            nn.utils.clip_grad_norm_(self.value_network.parameters(), 10)
+            self.optimizer_v.step()
+
+        else:
+            warnings.warn("No training mode specified", UserWarning)
+        
+        # self.optimizer_a.zero_grad()
+        # self.optimizer_v.zero_grad()
+        # if self.algorithm == "dsac":
+        #     self.optimizer_alpha.zero_grad()
+        
+        # loss.backward()
+        # nn.utils.clip_grad_norm_(self.parameters(), 10)
+
+        # self.optimizer_a.step()
+        # self.optimizer_v.step()
+        # if self.algorithm == "dsac":
+        #     self.optimizer_alpha.step()
 
         # -------- soft-update target value network ------------
+        
         state_dict = self.value_network.state_dict()
         state_dict_tar = self.target_value_network.state_dict()
         for key in state_dict_tar.keys():
@@ -319,9 +334,21 @@ class RLMahjong(nn.Module):
 
         self.update_times += 1
 
+        # ---------- reset  ----------
+
         self.eval()
 
-        return loss
+        return None
+
+    def reset_q(self):
+        self.value_network_1.reset_last_layer()
+        self.value_network_2.reset_last_layer()
+
+        state_dict = self.value_network.state_dict()
+        state_dict_tar = self.target_value_network.state_dict()
+        for key in state_dict_tar.keys():
+            state_dict_tar[key] = state_dict[key]
+        self.target_value_network.load_state_dict(state_dict_tar)
 
 
     def select_action(self, self_info, record, global_info, action_mask, temp=1):

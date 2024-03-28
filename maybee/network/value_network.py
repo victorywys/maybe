@@ -32,27 +32,38 @@ class AllInfoEncoder(nn.Module):
 
 @NETWORK.register_module()
 class QNetwork(nn.Module):
-    def __init__(self, hidden_size: int = 512):
+    def __init__(self, hidden_size: int = 1024):
         super(QNetwork, self).__init__()
 
         action_dim = 54
         self.info_encoder = AllInfoEncoder()
         self.record_encoder = RecordEncoder()
         self.global_info_encoder = GlobalInfoEncoder()
-        # self.q_net = nn.Sequential(
-        #     nn.Linear(self.info_encoder.out_dim + self.record_encoder.out_dim + self.global_info_encoder.out_dim, hidden_size),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_size, hidden_size),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_size, 1)
-        # )
-        self.q_net = nn.Sequential(
+        self.last_layer_v = nn.Linear(hidden_size, 1)
+        self.last_layer_a = nn.Linear(hidden_size, action_dim)
+
+        self.v_net = nn.Sequential(
             nn.Linear(self.info_encoder.out_dim + self.record_encoder.out_dim + self.global_info_encoder.out_dim, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, action_dim)
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            self.last_layer_v
         )
+        self.a_net = nn.Sequential(
+            nn.Linear(self.info_encoder.out_dim + self.record_encoder.out_dim + self.global_info_encoder.out_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            self.last_layer_a
+        )
+
+    def reset_last_layer(self):
+        self.last_layer_a.reset_parameters()
+        self.last_layer_v.reset_parameters()
 
     def forward(self, self_info, others_info, records, global_info) -> torch.Tensor:
         
@@ -61,12 +72,12 @@ class QNetwork(nn.Module):
         x3 = self.global_info_encoder(global_info)
         y = torch.cat([x1, x2, x3], dim=1)
 
-        # value = self.v_net(y)
-        # advantages = self.a_net(y)
-        # # Q = V(s) + A(s,a) - mean(A(s,a'))
-        # q_values = value + (advantages - advantages.mean(dim=-1, keepdim=True))
+        value = self.v_net(y)
+        advantages = self.a_net(y)
+        # Q = V(s) + A(s,a) - mean(A(s,a'))
+        q_values = value + (advantages - advantages.mean(dim=-1, keepdim=True))
 
-        q_values = self.q_net(y)
+        # q_values = self.q_net(y)
 
         return q_values
 
