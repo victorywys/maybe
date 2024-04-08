@@ -6,9 +6,9 @@ environment:
 
 target:
   service: singularity
-  # name: msrresrchvc    
+  name: msrresrchvc    
   # name: msroctovc   
-  name: msrrlvc
+  # name: msrrlvc
   # # vc: resrchvc
   #   TARGET NAME    RESOURCE GROUP          ACCELERATOR    QUOTAS (USED/LIMIT)
   # -------------  ----------------------  -------------  --------------------------------------------------
@@ -30,9 +30,9 @@ search:
     # {auto:3s} generates lr_0.00000_mom_0.5, .. etc
     # {auto:2s} generates lr_0.00000_mo_0.5, .. etc
     name: search_{auto:3s}
-    sku: 16G1
+    sku: 16G1-V100
     command:
-    - python train_rl_aml.py config/onlineRLamlt.yaml --algorithm dsac --target_entropy {te} --use_avg_q {avq} --entropy_penalty_beta {epb} --random_mps_change {mps}
+    - python train_rl_aml.py config/onlineRLamlt.yaml --runtime.output_dir $$AMLT_OUTPUT_DIR --algorithm dsac --use_avg_q {avq} --grad_step_num_v_per_epoch {gnv} --entropy_penalty_beta {epb} --random_mps_change {mps} --action_mask_mode {amm} 
     # - python train_rl_aml.py config/onlineRLamlt.yaml --algorithm grape --alpha_grape {alp} --lambd_grape {lmd} --coef_entropy {coe} --random_mps_change {mps}
 
     submit_args: &retry_args
@@ -48,14 +48,18 @@ search:
     - name: mps
       spec: discrete
       values: [0, 1]
+    
+    - name: amm
+      spec: discrete
+      values: [1, 2]
 
     - name: epb
       spec: discrete
-      values: [0.1, 0.3, 1, 3]
+      values: [0.01, 0.05, 0.2, 0.5, 4]
 
-    - name: te
+    - name: gnv
       spec: discrete
-      values: [0.2, 0.5, 0.7, 1.0]
+      values: [1000, 5000, 20000]
 
     - name: avq
       spec: discrete
