@@ -49,8 +49,8 @@ class RLConfig(PythonConfig):
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     # online learning setting
-    save_interval: int = 20000
-    stat_interval: int = 1000
+    save_interval: int = 10000
+    stat_interval: int = 4000
     resume: bool = False  # whether to resume from checkpoint
 
     # RL general
@@ -64,6 +64,8 @@ class RLConfig(PythonConfig):
     lr_value: float = 3e-5
     lr_actor: float = 3e-5
     random_mps_change: int = 1
+
+    action_mask_mode: int = 1
 
     # Discrete SAC 
     lr_alpha: float = 3e-4
@@ -85,14 +87,10 @@ if __name__ == "__main__":
     config = RLConfig.fromcli()
 
     if config.runtime.debug:
-        print_log("Debug mode", logger=logger)
+        print_log("Debug mode")
         config.train_start = 100
         config.batch_seq_num = 20
-        config.actor_training_offset = 10000
-        config.buffer_size = 1000
-        config.lr_value = 1e-4
-        config.lr_actor = 1e-5
-        
+        config.actor_training_offset = 0
 
     setup_experiment(config.runtime)
     print_config(config)

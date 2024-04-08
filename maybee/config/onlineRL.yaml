@@ -9,8 +9,8 @@ agent:
 
 runtime:
   seed: 42
-  output_dir: "./output/rl_player"
-  checkpoint_dir: "./output/rl_player/checkpoints"
+  output_dir: "./output/20240403"
+  checkpoint_dir: "./output/20240403"
   debug: False
 
 player1:

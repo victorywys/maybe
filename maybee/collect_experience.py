@@ -22,7 +22,6 @@ from dataclasses import field
 
 
 # ==================== arg parse & hyper-parameter setting ==================
-savepath = os.getenv('AMLT_OUTPUT_DIR', '/tmp') + '/data/'
 
 def is_prime(n):
     # 小于2的数不是素数
@@ -58,7 +57,7 @@ class RLConfig(PythonConfig):
     resume: bool = False  # whether to resume from checkpoint
 
     # RL general
-    num_games: int = 100000
+    num_games: int = 1050000
     algorithm: str = "dsac"  # dsac, grape
     gamma: float = 0.999
     buffer_size: int = 10000  # for 16G GPU memory
@@ -67,7 +66,7 @@ class RLConfig(PythonConfig):
     grad_step_num_a_per_game: int = 1
     lr_value: float = 2e-4
     lr_actor: float = 1e-5
-    random_mps_change: int = 1
+    random_mps_change: int = 0
 
     action_mask_mode: int = 1
 
@@ -95,6 +94,8 @@ if __name__ == "__main__":
     setup_experiment(config.runtime)
     print_config(config)
     logging.basicConfig(filename=os.path.join(get_output_dir(), "stdout.log"), level=logging.INFO)
+    
+    savepath = os.path.join(get_output_dir(), "replay_buffer")
 
     if os.path.exists(savepath):
         logging.info('{} exists (possibly so do data).'.format(savepath))
@@ -108,14 +109,12 @@ if __name__ == "__main__":
         config.player3.build(),
         config.player4.build(),
     ]
-    
+
     agent = config.agent.build(actor_network=players[0].model,
                                config=config,
                                device='cuda'
                               )
-    if config.resume:
-        agent._resume("./resume.pth")
-
+    
     record_buffer = MajEncV2ReplayBuffer(max_num_seq=config.buffer_size, device='cuda') 
 
     env = MahjongEnv()
@@ -125,7 +124,7 @@ if __name__ == "__main__":
     game = 0
     success_games = 0
 
-    epoch = 0
+    epoch = 99
 
     winds = ["east", "south", "west", "north"]
 
@@ -184,22 +183,11 @@ if __name__ == "__main__":
                     policy_probs[step] = policy_prob
 
                     step += 1
-                
                 else:
                     a = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask)  # AI player does padding interiorly 
                                         
                 env.step(curr_player_id, a)
 
-                # test Q value, for debugging
-                if env.is_over() and step > 1:
-                    
-                    q = agent.value_network(torch.from_numpy(sin_array[step - 1: step]).cuda().float(),
-                                            torch.from_numpy(oin_array[step - 1: step]).cuda().float(),
-                                            torch.from_numpy(rcd_array[step - 1: step]).cuda().float(),
-                                            torch.from_numpy(gin_array[step - 1: step]).cuda().float())
-
-                    logging.info("Q value = %3.3f" % q[0, actions[step - 1]].cpu().item())
-            
                 # ------- update state encoding ------------
                 te.update()
             
@@ -231,6 +219,13 @@ if __name__ == "__main__":
                 # scores = env.t.get_result().score
                 record_buffer.append_episode(sin_array, oin_array, rcd_array, gin_array, actions, policy_probs, action_masks, rs, dones, step)
 
+                if record_buffer.size >= record_buffer.max_num_seq:
+                    torch.save(record_buffer, os.path.join(savepath, "replay_buffer_{}.pth".format(epoch)))
+                    epoch += 1
+                    del record_buffer
+                    record_buffer = MajEncV2ReplayBuffer(max_num_seq=config.buffer_size, device='cuda') 
+                    logging.info("========== Replay buffer saved at epoch {} ============".format(epoch))
+
             # ----------------------- get result ---------------------------------
             payoffs = np.array(env.get_payoffs())
             
@@ -243,18 +238,6 @@ if __name__ == "__main__":
             success_games += 1
             game += 1
 
-            # if record_buffer.size > min(config.save_interval, record_buffer.max_num_seq // 10):
-
-            if game % config.buffer_size == 0:
-                if (epoch + 1) % config.epoch_reset == 0:
-                    agent.reset_q()
-                for _ in range(config.grad_step_num_v_per_epoch):
-                    agent.update(record_buffer, actor_training=False, critic_training=True)
-                epoch += 1
-            
-            if epoch >= 1:
-                for _ in range(config.grad_step_num_a_per_game):
-                    agent.update(record_buffer, actor_training=True, critic_training=False)
             
         except Exception as inst:
             
@@ -269,82 +252,3 @@ if __name__ == "__main__":
             # logging.info("-------------- replayable log -------------------------------")
             # env.t.print_debug_replay()
             continue
-        
-        if game % config.stat_interval == 0:
-            
-            for p in players:
-                p.reset_stats()
-            
-            for game_test in range(int(config.stat_interval / 2)):
-
-                try:
-                    env.reset(oya=game_test % 4, game_wind=winds[game_test % 2], kyoutaku=0, honba=0)
-                    
-                    # encoder
-                    te = pm.TableEncoder(env.t)
-                    te.init()
-                    te.update()
-
-                    if game_test % 255 == 0:
-                        th_logger = TenhouJsonLogger()
-                        th_logger.init_match(
-                            player_names=[p.name for p in players],
-                            game_desc1="Test play with SL players",
-                            rule_desc="1 game test",
-                        )
-                        th_logger.start_game(env.t, te)
-                    
-                    while not env.is_over():
-                        curr_player_id = env.get_curr_player_id()
-                        valid_actions_mask = env.get_valid_actions(nhot=True)
-                        obs = np.array(te.self_infos[curr_player_id]).reshape([18, 34]).swapaxes(0, 1)
-                        rcd = np.array(te.records[curr_player_id])
-                        
-                        if rcd.ndim == 1:
-                            rcd = np.zeros([0, 55], dtype=bool)
-                        
-                        gin = np.array(te.global_infos[curr_player_id])
-
-                        # --------- make decision -------------                
-
-                        if curr_player_id == 0:   # only record player 0 (the RL agent)
-                            a, policy_prob = agent.select_action(obs, rcd, gin, valid_actions_mask, temp=0.01) # greedy                        
-                        else:
-                            a = players[curr_player_id].play(obs, rcd, gin, valid_actions_mask)  # AI player does padding interiorly 
-                                                
-                        env.step(curr_player_id, a)
-                        te.update()
-                    
-                    for i, p in enumerate(players):
-                        p.update_stats(env.t, i)
-                    
-                    if game_test % 255 == 0:
-                        th_logger.end_game(env.t, te)
-                        logging.info("game {}".format(game_test)) 
-                        logging.info(th_logger.dump_urls())
-                
-                except Exception as inst:
-                    try:
-                        print("-------------- execption in game {} -------------------------".format(game_test))
-                        print('Exception: ', inst)
-                        print("----------------- Traceback ---------------------------------")
-                        traceback.print_exc()
-                    except:
-                        pass
-                    
-                # end for
-                
-            for i, p in enumerate(players[:1]):
-                logging.info("Player {} stats: \n{}".format(i, p.dump_stats()))
-            
-        if game % config.save_interval == 0:
-
-            logging.info("==================================================================================")
-            
-            logging.info("Total time: {:.2f}s".format(time.time() - start_time))
-            logging.info("Success games: {}".format(success_games))
-            
-            # save model
-            agent._save(os.path.join(savepath, "rl_game_{}.pth".format(game)))
-            
-            logging.info("==================================================================================")

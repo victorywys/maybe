@@ -4,13 +4,14 @@ import warnings
 from torch.nn.utils.rnn import *
 
 
-class MajEncV2ReplayBuffer:
+class MajEncV2ReplayBuffer():
     def __init__(self, sin_shape=[34, 18], oin_shape=[34, 54], rcd_dim=55, gin_dim=15, action_dim=54, max_num_seq=int(1e5), 
                  batch_size=32, device='cuda'):
         super(MajEncV2ReplayBuffer, self).__init__()
 
         self.max_steps = 50
         self.max_rcd_len = 200
+        self.epoch = 0  # epoch counter
 
         self.sin_shape = sin_shape
         self.rcd_dim = rcd_dim
@@ -103,9 +104,20 @@ class MajEncV2ReplayBuffer:
         self.tail = (self.tail + 1) % self.max_num_seq
         self.size = min(self.size + 1, self.max_num_seq)
 
-    def sample_contiguous_batch(self, num_seq=32, random_mps_change=False):
+    def sample_contiguous_batch(self, num_seq=32, random_mps_change=False, random_sample=False):
         # sample num_seq episodes, each episode is a contiguous sequence, concatenate them to a batch
-        sampled_episodes = torch.from_numpy(np.random.choice(self.size, [num_seq])).to(torch.int64)
+        
+        if random_sample:
+            sampled_episodes = torch.from_numpy(np.random.choice(self.size, [num_seq])).to(torch.int64)
+        else:
+            ee = self.epoch - int(self.epoch)
+            if int(ee * self.size + num_seq) <= self.size:
+                sampled_episodes = torch.arange(int(ee * self.size), int(ee * self.size + num_seq)).to(torch.int64)
+            else:
+                sampled_episodes = torch.cat([torch.arange(int(ee * self.size), self.size).to(torch.int64),
+                                              torch.arange(0, int(ee * self.size + num_seq - self.size)).to(torch.int64)], dim=0)
+        
+        self.epoch += num_seq / self.size
 
         length_b = self.length[sampled_episodes]
         
