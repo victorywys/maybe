@@ -55,6 +55,7 @@ class RLConfig(PythonConfig):
     save_interval: int = 10000
     stat_interval: int = 5500
     resume: bool = False  # whether to resume from checkpoint
+    
 
     # RL general
     num_games: int = 1050000
@@ -71,6 +72,9 @@ class RLConfig(PythonConfig):
     action_mask_mode: int = 1
 
     epoch_reset: int = 2  # Resetting the last layer of Q network
+
+    hand_encoder: str = "cnn"
+    init_log_alpha: float = -3
 
     # Discrete SAC 
     lr_alpha: float = 3e-4

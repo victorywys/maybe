@@ -101,10 +101,11 @@ class RLMahjong(nn.Module):
         self.config = config
         self.algorithm = config.algorithm
 
-        if self.config.algorithm == "grape":
+        if self.config.algorithm in ["grape", "plain"] :
             self.grape = GRAPE(alpha=config.alpha_grape, gamma=self.gamma, lambd=config.lambd_grape)
-            self.value_network = config.value_network.build(hand_encoder=self.config.hand_encoder)
+            self.value_network = config.value_network.build(hand_encoder=self.config.hand_encoder, dropout=config.dropout)
             self.target_value_network = deepcopy(self.value_network)
+            self.target_value_network.eval()
 
         elif self.config.algorithm == "dsac":
             self.log_alpha = nn.Parameter(torch.tensor(self.config.init_log_alpha, requires_grad=True, dtype=torch.float32))
@@ -133,20 +134,28 @@ class RLMahjong(nn.Module):
         self.writer.flush()
 
     def update(self, buffer, actor_training, critic_training):
-
-        self.train()
+                
+        if not actor_training and not critic_training:
+            self.eval()  # testing
+        
+        if actor_training:
+            self.actor_network.train()
+        if critic_training:
+            self.value_network.train()
 
         # sample a batch of data from replay buffer
-        batch = buffer.sample_contiguous_batch(num_seq=self.config.batch_seq_num, random_mps_change=self.config.random_mps_change)
-        
-        self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, rewards, dones, lengths = batch
-
-        #### DEBUG!!!
+        # batch = buffer.sample_contiguous_batch(num_seq=self.config.batch_seq_num, random_mps_change=self.config.random_mps_change)
+        # self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, rewards, dones, lengths = batch
+        ### ================== DEBUG!!!============================
         # for i in reversed(range(len(rewards) - 1)):
         #     if not dones[i].item():
         #         dones[i] = dones[i + 1]
         #         rewards[i] = rewards[i + 1]
-        
+        # rewards = rewards.clamp(-torch.inf, 0)
+        ### ================== DEBUG!!!============================
+
+        self_infos, others_infos, records, global_infos, actions, action_masks, policy_probs, _, rewards, dones, lengths = buffer.sample_batch(self.config.batch_seq_num * 20)
+
         one_hot_actions = nn.functional.one_hot(actions.to(torch.int64), num_classes=action_masks.shape[-1]) # convert actions to one-hot
 
         action_masks = action_masks.to(torch.float)
@@ -160,12 +169,24 @@ class RLMahjong(nn.Module):
         action_masks_ = torch.zeros_like(action_masks) - (action_masks < 0.5).to(torch.float) # [-1, -1, 0, 0, -1, -1, ....]
         action_masks_p_ = torch.cat([action_masks_, torch.zeros_like(action_masks_[:1])], dim=0)
 
-        if self.algorithm == "dsac":
+        if self.algorithm == "plain":
+            # -------- critic learning ----------
+            q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size, action_dim]
+            loss_c = torch.mean(self.mse_loss(torch.sum(q * one_hot_actions, dim=-1), rewards))
+
+            if np.random.rand() < 0.1 / np.log(self.update_times + 1):
+                logging.info("----------- Q 抽查 ({}) ------------".format("training" if critic_training else "testing"))
+                idx = np.random.choice(len(rewards), 6) if len(rewards) >= 6 else np.arange(len(rewards))
+                logging.info("target           " + np.array2string(rewards[idx].detach().cpu().numpy().flatten(), separator=', ', precision=1))
+                logging.info("q1_a             " + np.array2string(q[idx, actions[idx]].detach().cpu().numpy().flatten(), separator=', ', precision=1))
+
+        elif self.algorithm == "dsac":
 
             # -------- critic learning ----------
             q1 = self.value_network_1(self_infos, others_infos, records, global_infos)[:-1] # [batch_size, action_dim]
             q2 = self.value_network_2(self_infos, others_infos, records, global_infos)[:-1] # [batch_size, action_dim]
             with torch.no_grad():
+                self.target_value_network.eval()
                 q_tar_tp1_1 = self.target_value_network_1(self_infos, others_infos, records, global_infos)[1:]
                 q_tar_tp1_2 = self.target_value_network_2(self_infos, others_infos, records, global_infos)[1:]
 
@@ -181,16 +202,16 @@ class RLMahjong(nn.Module):
                 entropy_tp1 = - torch.sum(pi_tp1 * logpi_tp1, dim=-1)
                 
                 if self.config.use_avg_q:
-                    y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * ((
+                    y = rewards.reshape([-1]) + (1 - dones.reshape([-1])) * self.gamma * ((
                         torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1) + torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) / 2 + self.log_alpha.detach().exp() * entropy_tp1)
                 else:
-                    y = rewards.reshape([-1]) + (1. - dones.reshape([-1])) * self.gamma * (torch.minimum(
+                    y = rewards.reshape([-1]) + (1 - dones.reshape([-1])) * self.gamma * (torch.minimum(
                         torch.sum(q_tar_tp1_1 * pi_tp1, dim=-1), torch.sum(q_tar_tp1_2 * pi_tp1, dim=-1)) + self.log_alpha.detach().exp() * entropy_tp1)
 
                 # y - alpha * log(pi(a_{t+1}|s_{t+1}))
                 
             if np.random.rand() < 0.01:
-                logging.info("----------- Q 抽查 ------------")
+                logging.info("----------- Q 抽查 ({}) ------------".format("training" if critic_training else "testing"))
 
                 idx = torch.argwhere((y < -5).to(torch.int) + (y > 5).to(torch.int))
                 if len(idx) >= 6:
@@ -253,6 +274,7 @@ class RLMahjong(nn.Module):
         elif self.algorithm == "grape":
             q = self.value_network(self_infos, others_infos, records, global_infos) # [batch_size + 1, action_dim]
             with torch.no_grad():
+                self.target_value_network.eval()
                 q_tar = self.target_value_network(self_infos, others_infos, records, global_infos)
                 pi = torch.softmax(self.actor_network(self_infos, records, global_infos).detach() + action_masks_p_ * INFINITY, dim=-1) 
                 pi = pi / pi.sum(dim=-1, keepdim=True)
@@ -261,7 +283,7 @@ class RLMahjong(nn.Module):
             loss_c = self.mse_loss(q[np.arange(rewards.shape[0]), actions], q_grape.detach())
 
             if np.random.rand() < 0.03:
-                logging.info("----------- Q 抽查 ({}) ------------".format("training" if critic_training else "testing"))
+                logging.info("----------- Q 抽查 ------------")
 
                 idx = torch.argwhere((q_grape < -5).to(torch.int) + (q_grape > 5).to(torch.int))
                 if len(idx) >= 6:

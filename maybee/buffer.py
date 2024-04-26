@@ -86,8 +86,8 @@ class MajEncV2ReplayBuffer():
         self.records[self.tail][:length + 1] = torch.from_numpy(rcd[:length + 1]).to(device=self.device)
         self.records[self.tail][length + 1:] = 0
 
-        self.global_infos[self.tail][:length] = torch.from_numpy(gin[:length]).to(device=self.device)
-        self.global_infos[self.tail][length:] = 0
+        self.global_infos[self.tail][:length + 1] = torch.from_numpy(gin[:length + 1]).to(device=self.device)
+        self.global_infos[self.tail][length + 1:] = 0
         
         self.actions[self.tail][:length] = torch.from_numpy(actions[:length]).to(device=self.device)
         self.actions[self.tail][length:] = 0
@@ -163,8 +163,6 @@ class MajEncV2ReplayBuffer():
         for i in range(batch_size + 1):
             rcd_lens.append(rcd_sum[i].nonzero().size(0) + 1)  # + 1 due to the start token
 
-        # print(rcd_lens)
-
         records_b = pack_padded_sequence(records_b, rcd_lens, batch_first=True, enforce_sorted=False)
 
         return self_infos_b, others_infos_b, records_b, global_infos_b, actions_b, action_masks_b, policy_prob_b, rewards_b, dones_b, length_b
@@ -201,17 +199,20 @@ class MajEncV2ReplayBuffer():
 
         sampled_episodes = torch.from_numpy(np.random.choice(self.size, [batch_size])).to(torch.int64)
 
-        length_b = self.length[sampled_episodes]
+        length_b = self.length[sampled_episodes].cpu()
         
         sampled_steps = torch.zeros([batch_size], dtype=torch.int64)
         for b in range(batch_size):
-            sampled_steps[b] = np.random.choice(length_b[b].cpu().item())
+            sampled_steps[b] = np.random.choice(length_b[b].item())
 
         actions_b = self.actions[sampled_episodes, sampled_steps]
 
         policy_prob_b = self.policy_prob[sampled_episodes, sampled_steps]
         action_masks_b = self.action_masks[sampled_episodes, sampled_steps]
         rewards_b = self.rewards[sampled_episodes, sampled_steps]
+
+        final_outcomes_b = self.rewards[sampled_episodes, length_b - 1]  # final outcomes of a game
+        
         dones_b = self.dones[sampled_episodes, sampled_steps]
 
         self_infos_b = self.self_infos[sampled_episodes, sampled_steps].float()
@@ -221,5 +222,5 @@ class MajEncV2ReplayBuffer():
 
         records_b = pack_padded_sequence(records_b, length_b + 1, batch_first=True, enforce_sorted=False)
         
-        return self_infos_b, others_infos_b, records_b, global_infos_b, actions_b, action_masks_b, policy_prob_b, rewards_b, dones_b, length_b
+        return self_infos_b, others_infos_b, records_b, global_infos_b, actions_b, action_masks_b, policy_prob_b, rewards_b, final_outcomes_b, dones_b, length_b
     

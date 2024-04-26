@@ -36,15 +36,16 @@ class RLConfig(PythonConfig):
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
 
-    algorithm: str = "dsac"  # dsac, grape
+    algorithm: str = "plain"  # dsac, grape, plain
     gamma: float = 0.999
     n_buffer: int = 88
-    batch_seq_num: int = 88
+    batch_seq_num: int = 44
 
     hand_encoder: str = "transformer"
     random_mps_change: int = 0
     action_mask_mode: int = 1
     lr_value: float = 1e-3
+    dropout: float = 0.1
     # epoch_reset: int = 2  # Resetting the last layer of Q network
     
     # Discrete SAC 
@@ -79,7 +80,13 @@ if __name__ == "__main__":
     print_config(config)
     logging.basicConfig(level=logging.INFO)
     
-    savepath = os.path.join(os.getenv('AMLT_OUTPUT_DIR', get_output_dir()), '/data/')
+    if os.getenv('AMLT_OUTPUT_DIR') is None:
+        path = get_output_dir()
+    else:
+        path = os.getenv('AMLT_OUTPUT_DIR')
+
+    savepath = os.path.join(path, 'data')
+    print(savepath)
 
     if os.path.exists(savepath):
         logging.info('{} exists (possibly so do data).'.format(savepath))
@@ -96,7 +103,7 @@ if __name__ == "__main__":
     n_buffer = config.n_buffer
     test_data_id = config.n_buffer
     
-    test_record_buffer = torch.load(os.path.join(buffer_dir, "replay_buffer_{}.pth".format(test_data_id)))
+    test_record_buffer = torch.load(os.path.join(buffer_dir, "replay_buffer_{}.pth".format(test_data_id)), map_location='cuda')
     test_record_buffer.epoch = 0
     loss_c_trains = []
     loss_c_tests = []
@@ -105,19 +112,19 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=agent.optimizer_v, eta_min=1e-5, T_0=1000)
 
     train_buffer_ids = list()
-    for n in range(10000):
+    for n in range(1000):
         train_buffer_ids = train_buffer_ids + list(np.random.permutation(n_buffer))
     
     grad_step = 0
     train_data_id = 0
 
-    while grad_step <= 100000:
+    while grad_step <= 300000:
         # Load the selected file
         train_buffer_id = train_buffer_ids[train_data_id]
-        train_record_buffer = torch.load(os.path.join(buffer_dir, "replay_buffer_{}.pth".format(train_buffer_id)))
+        train_record_buffer = torch.load(os.path.join(buffer_dir, "replay_buffer_{}.pth".format(train_buffer_id)), map_location='cuda')
         
         train_record_buffer.epoch = 0
-        while train_record_buffer.epoch < 1:
+        for _ in range(int(10000 / config.batch_seq_num) if config.random_mps_change == 0 else int(10000 / config.batch_seq_num * 6)):
 
             loss_c_train = agent.update(train_record_buffer, actor_training=False, critic_training=True)
             loss_c_trains.append(loss_c_train)
@@ -138,12 +145,12 @@ if __name__ == "__main__":
             # save model
             if (grad_step + 1) % config.save_interval == 0:
 
-                logging.info("==================================================================================")
+                logging.info("================================= save =============================================")
                 
                 # save modeln
                 agent._save(os.path.join(savepath, "critic_learning_{}.pth".format(grad_step + 1)))
                 
-                logging.info("==================================================================================")
+                logging.info("=============================  critic_learning_{}.pth  ===============  ".format(grad_step + 1))
 
             grad_step += 1
         

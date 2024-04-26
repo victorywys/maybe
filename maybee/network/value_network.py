@@ -15,7 +15,6 @@ class FourierTransformInfoEmbedding(nn.Module):
     def forward(self, x: torch.Tensor):
         # x: shape [batch_size, 34, n_dim]
         # return: shape [batch_size, 34, n_embedding * 2]
-        x_shape = x.shape
         y = torch.view_as_real(fft.fft(x)).reshape([*x.shape[:-1], self.n_dim * 2])
         
         return y
@@ -49,7 +48,7 @@ class InfoEncoder(nn.Module):
 class FTInfoEncoder(nn.Module):
     def __init__(self):
         super(FTInfoEncoder, self).__init__()
-        self.encoder = InfoEncoder(18)
+        self.encoder = InfoEncoder(36)
         self.fft = FourierTransformInfoEmbedding(18)
         self.out_dim = self.encoder.out_dim * 4
     
@@ -68,17 +67,20 @@ class FTInfoEncoder(nn.Module):
 
 @NETWORK.register_module()
 class QNetwork(nn.Module):
-    def __init__(self, hidden_size: int = 1024, dropout: float = 0.1, hand_encoder: str="transformer"):
+    def __init__(self, hidden_size: int = 1024, dropout: float = 0.0, hand_encoder: str="transformer"):
         super(QNetwork, self).__init__()
 
         action_dim = 54
         self.hand_encoder = hand_encoder
         if self.hand_encoder == "transformer":
-            self.info_encoder = TransformerRegression(input_dim=72, out_dim=hidden_size)
+            self.info_encoder = TransformerRegression(input_dim=72, out_dim=hidden_size, dropout=dropout)
+            print("Using transformer encoder")
         elif self.hand_encoder == "cnn":
             self.info_encoder = InfoEncoder(72)
+            print("Using CNN encoder")
         elif self.hand_encoder == "fftcnn":
             self.info_encoder = FTInfoEncoder()
+            print("Using FFT CNN encoder")
         self.record_encoder = RecordEncoder()
         self.global_info_encoder = GlobalInfoEncoder()
 
@@ -121,18 +123,18 @@ class QNetwork(nn.Module):
         x3 = self.global_info_encoder(global_info)
         y = torch.cat([x1, x2, x3], dim=-1)
 
-        value = self.v_net(y)
-        advantages = self.a_net(y)
-        # Q = V(s) + A(s,a) - mean(A(s,a'))
-        q_values = value + (advantages - advantages.mean(dim=-1, keepdim=True))
+        # value = self.v_net(y)
+        # advantages = self.a_net(y)
+        # # Q = V(s) + A(s,a) - mean(A(s,a'))
+        # q_values = value + (advantages - advantages.mean(dim=-1, keepdim=True))
 
-        # q_values = self.q_net(y)
+        q_values = self.a_net(y)
 
         return q_values
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=34):
+    def __init__(self, d_model, dropout=0.0, max_len=34):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -152,7 +154,7 @@ class PositionalEncoding(nn.Module):
 
 
 class TransformerRegression(nn.Module):
-    def __init__(self, input_dim=72, out_dim=2048, d_model=512, nhead=8, num_encoder_layers=6, dim_feedforward=2048, dropout=0.1):
+    def __init__(self, input_dim=72, out_dim=2048, d_model=512, nhead=8, num_encoder_layers=6, dim_feedforward=2048, dropout=0.0):
         super(TransformerRegression, self).__init__()
         self.input_linear = nn.Linear(input_dim, d_model)  # Linear layer to project input to d_model
         self.pos_encoder = PositionalEncoding(d_model, dropout, 34)  # Positional encoding layer
